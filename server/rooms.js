@@ -74,6 +74,9 @@ export class RoomManager {
       case MSG.AGAIN:
         room?.again(id);
         break;
+      case MSG.TO_LOBBY:
+        room?.toLobby(id);
+        break;
     }
   }
 
@@ -175,7 +178,9 @@ export class Room {
       const rot = this.roleRotation % members.length;
       const order = [...members.slice(rot), ...members.slice(0, rot)];
       const split = splitRoles(order.length);
-      order.forEach((p, i) => { p.roles = split[Math.min(i, split.length - 1)] || []; });
+      // 5+ pilots: double up round-robin — two people arguing over the same
+      // legs is not a bug, it's the premise
+      order.forEach((p, i) => { p.roles = split[i % split.length] || []; });
     }
     this.roleRotation++;
   }
@@ -211,6 +216,15 @@ export class Room {
     this.stopLoop();
     this.game = null;
     this.start(id); // re-assigns roles (rotated) and starts a fresh game
+  }
+
+  // host sends everyone back to the lobby (to change modes, regroup, argue)
+  toLobby(id) {
+    if (id !== this.hostId || !this.game) return;
+    this.stopLoop();
+    this.game = null;
+    for (const p of this.players.values()) p.roles = [];
+    this.broadcastRoom();
   }
 
   input(id, data) {

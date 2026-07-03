@@ -172,6 +172,7 @@ export const MSG = {
   BUY: 'buy',
   SHOP_DONE: 'shopDone',
   AGAIN: 'again',
+  TO_LOBBY: 'toLobby',
   // server -> client
   WELCOME: 'welcome',
   ROOM: 'room',       // lobby / player-list / role updates
