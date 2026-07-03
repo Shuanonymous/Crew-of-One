@@ -49,16 +49,33 @@ minutes), then KAIJU BRAWL. Try MECH DUEL when you have 4+ people.
   eye laser: hold the button, the whole mech stops for 3 seconds, then ZAP.
   Charging at the wrong moment is the single funniest thing in the game.
 
-## 4. Things to try (comedy checklist)
+## 4. Know your enemy (new roster)
 
-- Kick a crab mid-leap and watch it fly over a building.
+- **SCUTTLERS** — fast little packs. If your crew is slow, they will humble you.
+- **LOOGIE LOUIE** — lobs glowing globs from across the plaza and waddles away
+  if you approach. Sidestep the glob (it aims where you WERE), then laser him.
+- **SIR CLANKSALOT** — armored tank. Punches bounce off (25% damage). This is
+  what the laser is for.
+- **DIVE-BOMB DAVE** — circles overhead, screeches, then dives at where you're
+  standing. Move. Or punch him out of the air mid-dive if you're brave.
+- **GRABLINS** — dozens of tiny gremlins that climb the mech and chew.
+  The LEGS player kicks to shake them ALL off at once.
+- **BOSSES every 5th wave** — named, huge, health bar across the top.
+  Watch for the long slam telegraph and get OUT of the ring.
+
+The sky changes as you survive: sunset → dusk → neon night → dawn.
+
+## 5. Things to try (comedy checklist)
+
+- Kick a car into a crab.
+- Kick a SCUTTLER mid-sprint and watch it clear a building.
 - Buy ROCKET PUNCH and miss on purpose — the fist launches like a missile.
 - Get hit by PIGEONZILLA's wing gust while charging the laser.
-- Watch the mech faceplant when the LEGS kick during the HEAD's charge.
+- Sweep the fully-charged laser across an entire scuttler pack.
 - Two players sharing the legs in a 5+ crew: WASD tug-of-war.
 - In the shop, let the person who never fights spend all the credits.
 
-## 5. Known quirks (all intentional or acceptable for v1)
+## 6. Known quirks (all intentional or acceptable for v1)
 
 - Desktop keyboard + mouse only. Phones/tablets show the page but can't play.
 - The free server naps when idle — first visitor wakes it (30–60 s).
@@ -68,7 +85,7 @@ minutes), then KAIJU BRAWL. Try MECH DUEL when you have 4+ people.
 - If everyone leaves a room, it evaporates (nothing is saved — by design,
   every run is self-contained).
 
-## 6. If something breaks
+## 7. If something breaks
 
 - Refresh the page — you'll land on the title screen; rejoin with the room code.
 - If the room is gone, make a new one (30 seconds).

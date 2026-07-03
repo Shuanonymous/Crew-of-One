@@ -2,6 +2,88 @@
 
 **Status: COMPLETE and DEPLOYED — live at https://crew-of-one.onrender.com**
 
+---
+
+# UPDATE PASS (feel / variety / atmosphere overhaul)
+
+All six requested sections shipped. Every tuning value is listed below for
+fast adjustment after the next playtest — they all live in
+`shared/constants.js` (server feel) and the noted client files.
+
+## 1. Game feel — "weight, not lag"
+| Value | Was | Now | Where |
+|---|---|---|---|
+| Max walk speed | 5.2 | **7.8** (+50%) | `MECH.maxWalkSpeed` |
+| Walk force (accel) | 2100 | **3800** (~0.25 s to full speed, reacts same frame) | `MECH.walkForce` |
+| Brake rate (keys released) | 2.4 | **3.2** | `MECH.brakeRate` |
+| Turn torque / damping | 2400 / 900 | **5200 / 1300** | `MECH.turnTorque/Damping` |
+| Punch windup / swing / recover | .55/.22/.50 | **.34/.16/.30** | `MECH.punch` |
+| Punch damage / knockback | 14 / 900 | **16 / 1150** | `MECH.punch` |
+| Kick windup / swing / recover | .70/.30/.90 | **.46/.24/.60** | `MECH.kick` |
+| Kick damage / knockback | 30 / 2100 | **36 / 2600** | `MECH.kick` |
+| Hitstop | — | **80 ms punch, 110 ms kick, 70 ms rocket** | `main.js handleEvents` |
+| Shake (step/punch/kick/fall/slam) | — | **0.14 / 0.4 / 0.75 / 1.1 / 1.2** trauma | `main.js` |
+| Damage numbers | — | DOM pop-offs; laser purple, ≥30 dmg = big red | `main.js dmgNumber` |
+| Monster speed | crab 2.3, pigeon 3.1 | **crab 3.2, pigeon 4.3** (+~38%) | `MONSTERS` |
+| Monster recover times | 1.1 / 1.4 | **0.7 / 0.9** (telegraphs kept ≥1.1 s) | `MONSTERS` |
+
+## 2. Laser overhaul
+- Always-on **crew-visible targeting line + reticle** (server computes the
+  aim endpoint every tick; guide thickens with charge, turns hot pink on
+  target).
+- **DPS 42 → 110**, fire time 1.4 → **2.4 s** (sweepable across a pack),
+  beam radius 2.2 → 2.6, range 60 → 75. Charge time still 3.0 s
+  (1.65 s with Espresso Laser) and the mech still roots — the tension stays.
+- White-hot core + additive purple sheath (bloom makes it glow), scorch
+  decals + spark bursts at the impact point, hitmarker ping + purple damage
+  numbers.
+
+## 3. Monster variety (all distinct behaviors, not palette swaps)
+| Type | HP (base+/wave) | Speed | The problem it poses |
+|---|---|---|---|
+| SCUTTLER (rusher) | 16+3 | 7.5 | Packs; punishes slow crews; 0.55 s telegraph |
+| CRABZILLA | 42+8 | 3.2 | Baseline bruiser (+ gustless swipes) |
+| PIGEONZILLA | 95+11 | 4.3 | Heavy; 35% chance wing-gust (0 dmg, huge shove) |
+| LOOGIE LOUIE (spitter) | 55+8 | 2.8 | Lobs dodgeable arcing globs from 26–34 m; backs away if approached |
+| SIR CLANKSALOT (tank) | 320+35 | 1.5 | Takes 25% melee damage — laser or rockets required |
+| DIVE-BOMB DAVE (flyer) | 40+6 | 9 (dive 26) | Circles at y=15, telegraphed dive line locks at YOUR position — sidestep |
+| GRABLIN (swarmling) | 3 | 8.5 | Latches on, 1.4 dps each — KICK to shake them all off (point-blank hits ignore the arc) |
+| BOSS (every 5th wave) | 850+30×wave | 2.3 | Named; 60% melee resist; 3 patterns: 3-hit swipe combo / summon rushers / ground slam (17 m radial, 1.9 s telegraph); top-screen health bar |
+
+Boss names: Baroness Pinchelot the Unreasonable, Gary Devourer of Bus Stops,
+Judge Clawstice, Kevin the Absolute Unit, Duke Slamwich III, Princess
+Stompathy. Wave recipes 1–10 hand-mixed (see `WAVES`), formula after,
+boss every 5th.
+
+## 4. Art direction — stylized cinematic
+- Golden-hour sun (low elevation → long shadows) + cool rim light behind.
+- Giant sun/moon disc, 2 rings of silhouetted skyline, 70 drifting embers,
+  gradient-canvas sky.
+- **Palette journey per wave**: sunset → dusk → neon night → dawn (3.5 s
+  crossfade on each wave start; `PALETTES` in `render.js`).
+- UnrealBloom (strength .55, threshold .82) + CSS vignette.
+- Buildings: water towers / AC units / antennas / neon strips (deterministic
+  per building), puntable car props (server-simulated, mass 2.5,
+  punt impulse = knockback × 0.055).
+- Mech de-goofed: bobble antenna → blade antenna with blinking warning
+  light; googly eyes stay on the monsters only.
+
+## 5. Music & sound
+- `music.js`: procedural step-sequencer, A minor, 112 BPM. Layers: pad+arp
+  (lobby/shop) → +kick/snare/hats+bass (waves) → +detuned lead & double-time
+  hats (boss). Crossfades 1.2 s. All synthesized — nothing licensed.
+- New sfx: sub-bass layer in impacts, laser hitmarker ping, glob splat,
+  flyer screech, per-type roar pitches (tank 0.45, rusher 1.8, boss 0.32).
+
+## 6. Verification
+- `npm test`: **43 + 24 checks, ALL PASS** (includes new per-behavior tests:
+  spitter range-keeping + projectile damage, tank melee resist, flyer dive,
+  swarm latch/kick-clear, boss wave-5 spawn + name + bar + slam + summon,
+  car punting).
+- Headless-browser: two-tab regression ALL PASS, zero console errors;
+  screenshots verified (palette shift, guide/reticle, beam, skyline, neon).
+- Live URL re-verified after redeploy.
+
 A goofy Pacific Rim: 2–8 friends in a room (4-letter code, no accounts) jointly
 pilot ONE huge, slow, heavy mech. Each pilot is a different body part. Waves of
 goofy kaiju attack a low-poly city. Comedy through coordination failure.
