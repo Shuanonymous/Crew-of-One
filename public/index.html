@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crew of One</title>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>" />
+  <script type="importmap">
+    { "imports": { "three": "/vendor/three.module.js" } }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="ui">
+    <div id="role-banner">
+      <div id="role-label">YOU ARE</div>
+      <div id="role-name">CONNECTING...</div>
+    </div>
+
+    <div id="status">connecting…</div>
+
+    <div id="toast"></div>
+
+    <div id="help">
+      <b>Phase 1 — solo test drive</b><br />
+      <span class="key">W A S D</span> walk &nbsp;
+      <span class="key">SPACE</span> jump<br />
+      <span class="key">MOUSE</span> look / aim arms &nbsp;
+      <span class="key">CLICK</span> grab / shove<br />
+      <span class="key">Q</span> / <span class="key">E</span> lean left / right
+    </div>
+
+    <div id="click-catch">
+      <div id="click-card">
+        <h1>CREW OF ONE</h1>
+        <p>Click anywhere to grab the controls</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
