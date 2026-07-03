@@ -139,7 +139,8 @@ export class Mech {
     } else if (this.grounded) {
       // heavy things PLANT their feet — brake hard when not driving,
       // otherwise the hovering torso ice-skates around the plaza
-      b.applyForce(new CANNON.Vec3(-b.velocity.x * b.mass * 2.4, 0, -b.velocity.z * b.mass * 2.4));
+      const br = MECH.brakeRate;
+      b.applyForce(new CANNON.Vec3(-b.velocity.x * b.mass * br, 0, -b.velocity.z * b.mass * br));
     }
     this.walkSpeed = Math.hypot(b.velocity.x, b.velocity.z);
 
@@ -236,9 +237,10 @@ export class Mech {
       for (const tg of targets) {
         if (!tg.alive || tg.body === this.body) continue;
         if (tg.body.position.distanceTo(r.p) < 4.2) {
-          tg.takeHit(26, r.p, 1400);
-          this.stats.damageDealt += 26;
-          this.events.push({ what: 'rocketHit' });
+          const dealt = tg.takeHit(26, r.p, 1400);
+          this.stats.damageDealt += dealt ?? 26;
+          this.events.push({ what: 'rocketHit', p: [rnd(r.p.x), rnd(r.p.y), rnd(r.p.z)] });
+          this.events.push({ what: 'dmgNum', p: [rnd(r.p.x), rnd(r.p.y + 2), rnd(r.p.z)], dmg: Math.round(dealt ?? 26) });
           r.t = 99;
           break;
         }
@@ -263,6 +265,7 @@ export class Mech {
         if (k.t >= K.windup) {
           k.phase = 'swing'; k.t = 0;
           this.stats.kicks++;
+          this.kickSwung = true; // game modes use this to shake off swarmlings
           const hit = this.sweepHit(targets, this.facingYaw, K.range, K.arc, K.damage, K.knockback);
           this.events.push({ what: hit ? 'kickHit' : 'kickMiss' });
           // kicking shoves the kicker backward a little too (physics comedy)
@@ -285,9 +288,27 @@ export class Mech {
     const chargeTime = this.upgrades.laser ? L.chargeTime * 0.55 : L.chargeTime;
     const lz = this.laser;
 
+    // aim guide: the whole crew always sees where the eye is pointing
+    const cast = this.castBeam(targets);
+    lz.aim = [rnd(cast.end.x), rnd(cast.end.y), rnd(cast.end.z)];
+    lz.aimHit = !!cast.target;
+
     if (lz.firing) {
       lz.fireT += dt;
-      this.resolveLaser(dt, targets);
+      const dmg = L.dps * dt;
+      if (cast.target) {
+        const dealt = cast.target.takeHit(dmg, cast.from, 60);
+        this.stats.damageDealt += dealt ?? dmg;
+        this.laserDmgAcc = (this.laserDmgAcc || 0) + (dealt ?? dmg);
+        if (this.laserDmgAcc >= 20) {
+          const p = cast.target.body.position;
+          this.events.push({ what: 'dmgNum', p: [rnd(p.x), rnd(p.y + (cast.target.radius || 2) + 1), rnd(p.z)], dmg: Math.round(this.laserDmgAcc), laser: true });
+          this.laserDmgAcc = 0;
+        }
+      }
+      lz.from = [rnd(cast.from.x), rnd(cast.from.y), rnd(cast.from.z)];
+      lz.to = lz.aim;
+      lz.hitting = !!cast.target;
       if (lz.fireT >= L.fireTime) { lz.firing = false; lz.charge = 0; lz.from = lz.to = null; }
       return;
     }
@@ -297,6 +318,7 @@ export class Mech {
       lz.charge = Math.min(1, lz.charge + dt / chargeTime);
       if (lz.charge >= 1) {
         lz.firing = true; lz.fireT = 0;
+        this.laserDmgAcc = 0;
         this.stats.lasers++;
         this.events.push({ what: 'laserFire' });
       }
@@ -306,37 +328,36 @@ export class Mech {
     }
   }
 
-  resolveLaser(dt, targets) {
+  // Where does the eye-line hit? Used for the guide AND the beam itself.
+  castBeam(targets) {
     const L = MECH.laser;
     const dir = aimDir(this.input.headYaw, this.input.headPitch);
     const from = this.body.position.clone();
-    from.y += MECH.torsoSize.y / 2 + 1.2; // eye height
-    let end = from.clone().vadd(dir.scale(L.range, new CANNON.Vec3()));
+    from.y += MECH.torsoSize.y / 2 + 1.2;
     let hitTarget = null, hitDist = L.range;
-
     for (const tg of targets) {
       if (!tg.alive || tg.body === this.body) continue;
-      // distance from target center to the beam line
       const toT = tg.body.position.vsub(from);
       const along = toT.dot(dir);
       if (along < 0 || along > L.range) continue;
       const closest = from.clone().vadd(dir.scale(along, new CANNON.Vec3()));
       const off = closest.distanceTo(tg.body.position);
-      const r = tg.radius || 3;
-      if (off < L.beamRadius + r && along < hitDist) {
+      if (off < L.beamRadius + (tg.radius || 3) && along < hitDist) {
         hitDist = along;
         hitTarget = tg;
       }
     }
+    // no monster in the way: end the guide at the ground plane if aiming down
+    let end;
     if (hitTarget) {
       end = from.clone().vadd(dir.scale(hitDist, new CANNON.Vec3()));
-      const dmg = L.dps * dt;
-      hitTarget.takeHit(dmg, from, 60);
-      this.stats.damageDealt += dmg;
+    } else if (dir.y < -0.02) {
+      const t = Math.min(L.range, -from.y / dir.y);
+      end = from.clone().vadd(dir.scale(t, new CANNON.Vec3()));
+    } else {
+      end = from.clone().vadd(dir.scale(L.range, new CANNON.Vec3()));
     }
-    this.laser.from = [rnd(from.x), rnd(from.y), rnd(from.z)];
-    this.laser.to = [rnd(end.x), rnd(end.y), rnd(end.z)];
-    this.laser.hitting = !!hitTarget;
+    return { from, end, target: hitTarget, dist: hitDist };
   }
 
   // Shared melee wedge check. Returns true if anything got hit.
@@ -352,9 +373,11 @@ export class Mech {
       let diff = dirYaw - yaw;
       while (diff > Math.PI) diff -= 2 * Math.PI;
       while (diff < -Math.PI) diff += 2 * Math.PI;
-      if (Math.abs(diff) > arc / 2) continue;
-      tg.takeHit(dmg, origin, knockback);
-      this.stats.damageDealt += dmg;
+      if (Math.abs(diff) > arc / 2 && dist > 3) continue; // point-blank always counts
+      const dealt = tg.takeHit(dmg, origin, knockback);
+      const p = tg.body.position;
+      this.events.push({ what: 'dmgNum', p: [rnd(p.x), rnd(p.y + (tg.radius || 2) + 1), rnd(p.z)], dmg: Math.round(dealt ?? dmg) });
+      this.stats.damageDealt += dealt ?? dmg;
       hit = true;
     }
     return hit;
@@ -427,6 +450,8 @@ export class Mech {
         from: this.laser.firing ? this.laser.from : null,
         to: this.laser.firing ? this.laser.to : null,
         hitting: !!this.laser.hitting,
+        aim: this.laser.aim || null,
+        aimHit: !!this.laser.aimHit,
       },
       rockets: this.rockets.map((r) => ({ side: r.side, p: [rnd(r.p.x), rnd(r.p.y), rnd(r.p.z)] })),
       up: this.upgrades,

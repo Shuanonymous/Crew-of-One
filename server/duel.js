@@ -1,6 +1,6 @@
 import * as CANNON from 'cannon-es';
 import { Mech } from './mech.js';
-import { buildCity, ARENA_RADIUS } from './city.js';
+import { buildCity, buildCars, ARENA_RADIUS } from './city.js';
 import { PHYSICS_HZ, PHASE } from '../shared/constants.js';
 
 // MECH DUEL — two crews, two mechs, one plaza. Same combat systems as
@@ -16,6 +16,9 @@ export class DuelGame {
 
     const city = buildCity(this.world, 13);
     this.cityDefs = city.defs;
+    const cars = buildCars(this.world, 8, 21);
+    this.cars = cars.bodies;
+    this.carDefs = cars.defs;
 
     this.mechA = new Mech(this.world, 'mechA', { x: -18, y: 8, z: 0 }, '#f5b13d', -Math.PI / 2);
     this.mechB = new Mech(this.world, 'mechB', { x: 18, y: 8, z: 0 }, '#7d9df0', Math.PI / 2);
@@ -31,10 +34,24 @@ export class DuelGame {
 
   targetFor(mech) {
     const other = mech === this.mechA ? this.mechB : this.mechA;
-    return [{
+    const targets = [{
       id: other.id, body: other.body, alive: !other.isDead, radius: 3.2,
-      takeHit: (d, f, k) => other.takeHit(d, f, k),
+      takeHit: (d, f, k) => { other.takeHit(d, f, k); return d; },
     }];
+    for (const c of this.cars) {
+      targets.push({
+        id: 'car', body: c, alive: true, radius: 1.8,
+        takeHit: (d, f, k) => {
+          if (!f) return 0;
+          const dir = c.position.vsub(f); dir.y = 0;
+          if (dir.length() > 0.01) dir.normalize();
+          dir.y = 0.7;
+          c.applyImpulse(dir.scale((k || 500) * 0.055));
+          return 0;
+        },
+      });
+    }
+    return targets;
   }
 
   // crew: 'A' | 'B'
@@ -90,7 +107,7 @@ export class DuelGame {
   }
 
   worldInfo() {
-    return { city: this.cityDefs, arenaRadius: ARENA_RADIUS, mode: 'duel' };
+    return { city: this.cityDefs, arenaRadius: ARENA_RADIUS, mode: 'duel', props: this.carDefs };
   }
 
   snapshot() {
@@ -100,6 +117,11 @@ export class DuelGame {
       phase: this.phase,
       mechs: [this.mechA.snapshot(), this.mechB.snapshot()],
       monsters: [],
+      props: this.cars.map((c, i) => ({
+        id: this.carDefs[i].id,
+        p: [r2(c.position.x), r2(c.position.y), r2(c.position.z)],
+        q: [r2(c.quaternion.x), r2(c.quaternion.y), r2(c.quaternion.z), r2(c.quaternion.w)],
+      })),
       ev: this.events,
     };
     if (this.phase === PHASE.WIN) snap.summary = this.summary;
@@ -109,3 +131,4 @@ export class DuelGame {
 }
 
 function clamp(n) { return Math.max(-1, Math.min(1, Number(n) || 0)); }
+function r2(n) { return Math.round(n * 100) / 100; }

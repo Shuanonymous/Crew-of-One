@@ -26,14 +26,14 @@ function stepFor(game, seconds, input) {
 
   stepFor(g, 6.5); // countdown to wave 1
   check('wave 1 starts after countdown', g.phase === PHASE.FIGHT && g.wave === 1);
-  check('wave 1 spawns 1 crab', g.monsters.length === 1 && g.monsters[0].type === 'crab');
+  check('wave 1 spawns 2 crabs', g.monsters.length === 2 && g.monsters.every((m) => m.type === 'crab'));
 
   // mech walks stable in the city
   stepFor(g, 4, { move: { x: 0, z: -1 }, aimYaw: 0 });
   check('mech walks without falling', !g.mech.isRagdoll && !g.mech.isDead,
     `pos=(${g.mech.body.position.x.toFixed(1)},${g.mech.body.position.y.toFixed(1)},${g.mech.body.position.z.toFixed(1)})`);
   const speed = g.mech.walkSpeed;
-  check('mech speed is slow and heavy (<= ~5.5)', speed <= 6, `speed=${speed.toFixed(1)}`);
+  check('mech speed near tuned max (7.8)', speed > 6 && speed <= 8.8, `speed=${speed.toFixed(1)}`);
 
   // teleport the crab in front of the mech and punch it to death
   const crab = g.monsters[0];
@@ -54,6 +54,8 @@ function stepFor(game, seconds, input) {
   check('punches kill the crab', !crab.alive, `after ${guard} punch cycles, crabHp=${crab.hp}`);
   check('kill pays credits', g.credits >= 20, `credits=${g.credits}`);
   check('kill counted', g.kills === 1);
+  // dispatch the second crab so the wave can clear
+  for (const t of g.mechTargets) if (t.alive && t.id !== 'car') t.takeHit(999, null, 0, 'laser');
 
   // wave clear -> shop
   stepFor(g, 3.5);
@@ -120,10 +122,12 @@ function stepFor(game, seconds, input) {
 // ------------------------------------------------------- KICK (fresh game)
 {
   const g = new BrawlGame();
-  stepFor(g, 6.5); // wave 1: exactly one crab
+  stepFor(g, 6.5); // wave 1: two crabs
   const kicked = g.monsters[0];
-  kicked.setState('recover'); kicked.t = -99; // pacify it
-  kicked.body.velocity.setZero();
+  for (const m of g.monsters) {
+    m.setState('recover'); m.t = -99; m.body.velocity.setZero();
+    if (m !== kicked) m.body.position.set(150, 4, 150);
+  }
   // settle the mech facing yaw 0
   for (let i = 0; i < 30; i++) { g.applyInput(ALL_ROLES, { move: { x: 0, z: 0 }, aimYaw: 0 }, ROLE, 'A'); g.step(); }
   kicked.body.position.set(g.mech.body.position.x, 4, g.mech.body.position.z - 7);
@@ -212,6 +216,135 @@ function stepFor(game, seconds, input) {
   stepFor(g, 3.2);
   check('training completes', g.phase === PHASE.WIN, `phase=${g.phase}`);
   check('training summary has a time', g.summary.time > 0, `time=${g.summary.time}s`);
+}
+
+// ------------------------------------------------- MONSTER VARIETY (update)
+import { Monster } from '../server/monsters.js';
+{
+  // SPITTER: keeps distance and lobs globs that hurt the mech
+  const g = new BrawlGame();
+  stepFor(g, 6.5);
+  for (const m of g.monsters) { m.hp = 0; m.deadT = 99; m.removed = true; g.world.removeBody(m.body); }
+  g.monsters = [new Monster(g.world, 'spitter', { x: 0, z: -30 }, 1)];
+  g.phase = PHASE.FIGHT;
+  const hp0 = g.mech.hp;
+  let sawProjectile = false;
+  for (let i = 0; i < 60 * 8; i++) {
+    g.applyInput(ALL_ROLES, { move: { x: 0, z: 0 }, aimYaw: 0 }, ROLE, 'A');
+    g.step();
+    if (g.projectiles.length) sawProjectile = true;
+  }
+  check('spitter lobs projectiles', sawProjectile);
+  check('spitter globs damage the mech', g.mech.hp < hp0, `hp ${hp0} -> ${g.mech.hp}`);
+  const spit = g.monsters[0];
+  spit.body.position.set(g.mech.body.position.x, 3, g.mech.body.position.z - 10);
+  const dBefore = 10;
+  stepFor(g, 3);
+  const dAfter = spit.body.position.distanceTo(g.mech.body.position);
+  check('spitter backs away when crowded', dAfter > dBefore + 3, `dist ${dBefore} -> ${dAfter.toFixed(1)}`);
+}
+{
+  // TANK: shrugs off melee, melts to laser
+  const g = new BrawlGame();
+  const tank = new Monster(g.world, 'tank', { x: 0, z: -10 }, 1);
+  const meleeDealt = tank.takeHit(40, null, 0, 'melee');
+  const laserDealt = tank.takeHit(40, null, 0, 'laser');
+  check('tank resists melee (25%)', meleeDealt === 10, `dealt=${meleeDealt}`);
+  check('tank takes full laser damage', laserDealt === 40, `dealt=${laserDealt}`);
+}
+{
+  // FLYER: circles at altitude, then dives through the mech
+  const g = new BrawlGame();
+  stepFor(g, 6.5);
+  for (const m of g.monsters) { m.hp = 0; m.deadT = 99; m.removed = true; g.world.removeBody(m.body); }
+  g.monsters = [new Monster(g.world, 'flyer', { x: 0, z: -26 }, 1)];
+  g.phase = PHASE.FIGHT;
+  const fl = g.monsters[0];
+  let minY = 99, dived = false, highBefore = false;
+  for (let i = 0; i < 60 * 12; i++) {
+    g.applyInput(ALL_ROLES, { move: { x: 0, z: 0 }, aimYaw: 0 }, ROLE, 'A');
+    g.step();
+    if (fl.state === 'walk' && fl.body.position.y > 10) highBefore = true;
+    if (fl.state === 'attack') { dived = true; minY = Math.min(minY, fl.body.position.y); }
+  }
+  check('flyer cruises at altitude', highBefore, `y=${fl.body.position.y.toFixed(1)}`);
+  // the dive aims at the mech's torso (~y 11), not the pavement
+  check('flyer dives at the mech', dived && minY < 12.5, `dive minY=${minY.toFixed(1)}`);
+}
+{
+  // SWARM: latches onto the mech and chews; a kick shakes them off
+  const g = new BrawlGame();
+  stepFor(g, 6.5);
+  for (const m of g.monsters) { m.hp = 0; m.deadT = 99; m.removed = true; g.world.removeBody(m.body); }
+  g.monsters = [
+    new Monster(g.world, 'swarmling', { x: 0, z: -8 }, 1),
+    new Monster(g.world, 'swarmling', { x: 2, z: -8 }, 1),
+  ];
+  g.phase = PHASE.FIGHT;
+  const hp0 = g.mech.hp;
+  stepFor(g, 4, { move: { x: 0, z: 0 }, aimYaw: 0 });
+  check('swarmlings latch onto the mech', g.monsters.some((m) => m.latched),
+    g.monsters.map((m) => m.state).join(','));
+  check('latched swarmlings chew the mech', g.mech.hp < hp0, `hp ${hp0} -> ${g.mech.hp.toFixed(1)}`);
+  // KICK to shake them off (point-blank hits ignore the arc)
+  for (let i = 0; i < 90; i++) {
+    g.applyInput(ALL_ROLES, { kick: i < 10, move: { x: 0, z: 0 }, aimYaw: 0 }, ROLE, 'A');
+    g.step();
+  }
+  check('kick shakes off / kills the swarm', g.monsters.every((m) => !m.alive || !m.latched),
+    g.monsters.map((m) => `${m.alive}/${m.latched}`).join(' '));
+}
+{
+  // BOSS: wave 5 spawns a named boss with a health bar and a slam pattern
+  const g = new BrawlGame();
+  g.wave = 4;
+  g.phase = PHASE.SHOP;
+  g.phaseT = 0.01;
+  g.step();
+  check('wave 5 is a boss wave', g.wave === 5 && g.monsters.some((m) => m.bossName),
+    g.monsters.map((m) => m.type).join(','));
+  const boss = g.monsters.find((m) => m.bossName);
+  check('boss has a funny name', typeof boss.bossName === 'string' && boss.bossName.length > 3, boss.bossName);
+  check('snapshot carries the boss bar', g.snapshot().bossBar?.name === boss.bossName);
+  // force the slam pattern
+  boss.body.position.set(g.mech.body.position.x + 10, 7, g.mech.body.position.z);
+  boss.setState('telegraph');
+  boss.attackKind = 'slam';
+  boss.teleTime = 0.1;
+  g.mech.invulnT = 0;
+  const hpB = g.mech.hp;
+  let slamSeen = false;
+  for (let i = 0; i < 90; i++) {
+    g.applyInput(ALL_ROLES, { move: { x: 0, z: 0 }, aimYaw: 0 }, ROLE, 'A');
+    g.step();
+    const s = g.snapshot();
+    if (s.monsters.some((m) => (m.ev || []).some((e) => e.what === 'slam'))) slamSeen = true;
+  }
+  check('boss slam fires and hurts the mech', slamSeen && g.mech.hp < hpB, `hp ${hpB} -> ${g.mech.hp}`);
+  // summon pattern
+  boss.hp = boss.maxHp;
+  boss.setState('telegraph');
+  boss.attackKind = 'summon';
+  boss.teleTime = 0.1;
+  const before = g.monsters.length;
+  stepFor(g, 1.5);
+  check('boss summons rusher minions', g.monsters.length > before, `${before} -> ${g.monsters.length}`);
+}
+{
+  // CARS: dynamic props exist and a punch punts them
+  const g = new BrawlGame();
+  check('city has puntable cars', g.cars.length === 10);
+  const car = g.cars[0];
+  car.position.set(0, 1, -6);
+  car.velocity.setZero();
+  stepFor(g, 0.5);
+  let maxV = 0;
+  for (let i = 0; i < 60; i++) {
+    g.applyInput(ALL_ROLES, { punchL: i < 10, aimYaw: 0, aimPitch: -0.2, move: { x: 0, z: 0 } }, ROLE, 'A');
+    g.step();
+    maxV = Math.max(maxV, car.velocity.length());
+  }
+  check('punch punts a car', maxV > 8, `peak v=${maxV.toFixed(1)}`);
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);

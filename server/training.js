@@ -73,7 +73,7 @@ export class TrainingGame {
   get mechTargets() {
     const targets = this.dummies.filter((m) => !m.removed).map((m) => ({
       id: m.id, body: m.body, alive: m.alive, radius: m.radius,
-      takeHit: (d, f, k) => m.takeHit(d, f, k),
+      takeHit: (d, f, k, kind) => m.takeHit(d, f, k, kind),
     }));
     // crates are punchable/kickable too
     for (const c of this.crates) {

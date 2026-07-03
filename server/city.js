@@ -81,6 +81,30 @@ export function buildCity(world, seed = 7) {
   return { defs, arenaRadius: ARENA_RADIUS };
 }
 
+// Dynamic props: cars that punches, kicks, monsters, and physics can punt.
+const CAR_COLORS = ['#ef767a', '#7d9df0', '#f5d76e', '#6fc2a0', '#fdf6ec', '#f2a65a'];
+export function buildCars(world, count = 10, seed = 5) {
+  const rng = mulberry32(seed);
+  const bodies = [];
+  const defs = [];
+  for (let i = 0; i < count; i++) {
+    const a = rng() * Math.PI * 2;
+    const r = ARENA_RADIUS * (0.35 + rng() * 0.55);
+    const body = new CANNON.Body({
+      mass: 2.5,
+      shape: new CANNON.Box(new CANNON.Vec3(1.6, 0.7, 0.9)),
+      position: new CANNON.Vec3(Math.cos(a) * r, 0.8, Math.sin(a) * r),
+      linearDamping: 0.35,
+      angularDamping: 0.5,
+    });
+    body.quaternion.setFromEuler(0, rng() * Math.PI * 2, 0);
+    world.addBody(body);
+    bodies.push(body);
+    defs.push({ id: 'car' + i, kind: 'car', size: [3.2, 1.4, 1.8], color: CAR_COLORS[i % CAR_COLORS.length] });
+  }
+  return { bodies, defs };
+}
+
 export function mulberry32(seed) {
   return function () {
     seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
