@@ -1,8 +1,6 @@
 # Crew of One — Progress
 
-**Status: feature-complete and self-tested. One 5-minute step remains — connecting
-a hosting account — because that requires the repo owner's login (details at the
-bottom and in PLAYTEST.md).**
+**Status: COMPLETE and DEPLOYED — live at https://crew-of-one.onrender.com**
 
 A goofy Pacific Rim: 2–8 friends in a room (4-letter code, no accounts) jointly
 pilot ONE huge, slow, heavy mech. Each pilot is a different body part. Waves of
@@ -117,17 +115,19 @@ npm test           # both test suites (game logic + websocket integration)
 
 ## Deployment state
 
-The repo is deploy-ready for all three suggested hosts (single service, binds
+**LIVE: https://crew-of-one.onrender.com** — Render free-tier web service,
+created via the Render API with the owner's key, deployed from the public
+repo's `claude/crew-of-one-game-uv7dmi` branch with auto-deploy on push.
+Verified post-deploy: HTTP 200 on `/` and `/healthz`, and a two-client
+websocket session on the live URL (room created, roles split, mech walked
+14 m with both clients seeing identical positions).
+
+The repo also stays portable to other hosts (single service, binds
 `process.env.PORT`, `/healthz` endpoint):
-- `render.yaml` — Render Blueprint (RECOMMENDED: free tier, websockets, zero config)
+- `render.yaml` — Render Blueprint (what's live now)
 - `Dockerfile` — works anywhere containers run
 - `fly.toml` — Fly.io
 - `railway.json` — Railway
-
-Creating/connecting the hosting account requires the repo owner's login
-(GitHub OAuth) — that's the one step that can't be done from this session.
-Click-by-click instructions are in PLAYTEST.md. Everything after that click is
-automatic.
 
 ## Gotchas for future sessions
 

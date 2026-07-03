@@ -3,21 +3,13 @@
 Plain language, no jargon. This is everything you need to put the game in
 front of friends.
 
-## 1. Put it online (one 5-minute step, one time)
+## 1. The game is LIVE
 
-The game is finished and tested, but web hosts require the account to be
-yours, so this one step is yours (it's free):
+**https://crew-of-one.onrender.com** — send that link to anyone.
 
-1. Go to **https://render.com** and click **Get Started** → sign up with your
-   **GitHub** account (the same one that owns this repository). Free, no
-   credit card.
-2. Once you're in, click **New +** (top right) → **Blueprint**.
-3. Render asks which repository: pick **Crew-of-One** (if it's not listed,
-   click "Configure account" and grant Render access to the repo).
-4. Render reads the `render.yaml` file in the repo and shows "crew-of-one —
-   web service (free)". Click **Apply** / **Deploy**.
-5. Wait 2–3 minutes. You get a URL like
-   **https://crew-of-one.onrender.com** — that's the game. Send it to anyone.
+It runs on Render's free tier under your account, deployed from this
+repository's `claude/crew-of-one-game-uv7dmi` branch. Every push to that
+branch redeploys automatically.
 
 Notes about the free tier:
 - After ~15 minutes with nobody playing, the server naps. The first person to
@@ -26,13 +18,14 @@ Notes about the free tier:
 - Every time this repository's main branch is updated, Render redeploys
   automatically.
 
-(Prefer Railway or Fly.io? The repo also contains `railway.json`, `fly.toml`
+(Want to move hosts later? The repo also contains `railway.json`, `fly.toml`
 and a `Dockerfile` — connect the repo on either platform and it deploys the
 same way.)
 
 ## 2. How a game night works
 
-1. One person opens the URL, types a name, clicks **CREATE ROOM**.
+1. One person opens **https://crew-of-one.onrender.com**, types a name,
+   clicks **CREATE ROOM**.
 2. They click **COPY INVITE LINK** and paste it in the group chat
    (or friends type the 4-letter code on the title screen).
 3. Everyone appears in the lobby. The host picks a mode and hits **START**.

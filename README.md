@@ -1,5 +1,7 @@
 # CREW of ONE
 
+**PLAY IT: https://crew-of-one.onrender.com**
+
 A co-op kaiju brawler for your browser. 2–8 friends join a room with a
 4-letter code and jointly pilot **ONE huge, slow, heavy mech** — someone is
 the LEGS, someone is the ARMS, someone is the HEAD with the eye laser that
