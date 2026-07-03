@@ -1,81 +1,144 @@
 # Crew of One — Progress
 
-A friendslop party game: 2–8 players join via a room code, get split into
-crews, and each crew jointly pilots ONE wobbly giant robot through an
-obstacle course. Each crew member controls a different body part.
+**Status: feature-complete and self-tested. One 5-minute step remains — connecting
+a hosting account — because that requires the repo owner's login (details at the
+bottom and in PLAYTEST.md).**
 
-## How to run it locally
+A goofy Pacific Rim: 2–8 friends in a room (4-letter code, no accounts) jointly
+pilot ONE huge, slow, heavy mech. Each pilot is a different body part. Waves of
+goofy kaiju attack a low-poly city. Comedy through coordination failure.
 
-1. Install Node.js (LTS version) from https://nodejs.org
-2. In a terminal, inside this project folder:
-   - `npm install`   (first time only)
-   - `npm start`
-3. Open http://localhost:3000 in Chrome, Edge, Firefox, or Safari.
+## How to run it
 
-## Technology (chosen for simplicity + one-service deployment)
+```
+npm install
+npm start          # http://localhost:3000
+npm test           # both test suites (game logic + websocket integration)
+```
 
-- **Three.js** — 3D rendering in the browser
-- **cannon-es** — physics engine, runs ON THE SERVER (authoritative:
-  clients only send inputs and render interpolated state, so all
-  players always see the same robot)
-- **Node.js + Express + ws** — one server serves the game files AND the
-  WebSocket connection, so it deploys as a single service (Railway /
-  Render / Fly.io ready)
-- **No build step** — files are served as-is via ES modules + import map
+## Technology
 
-## Phase status
+- **Three.js** — 3D in the browser, no build step (ES modules + import map)
+- **cannon-es** — physics, running ON THE SERVER (authoritative). Clients send
+  inputs, receive 20 Hz snapshots, and render 120 ms behind with interpolation,
+  so every pilot sees the same mech.
+- **Node.js + Express + ws** — one service serves the game files AND the
+  websockets. Deploys as a single free-tier service.
+- **WebAudio** — all sound effects are synthesized in code (no audio files).
 
-### ✅ Phase 1 — one robot, solo control, flat test area (DONE)
-- Server-authoritative physics at 60 Hz, state broadcast at 20 Hz,
-  clients interpolate 120 ms behind for smoothness
-- The robot: a hovering torso on an invisible spring ("legs"), soft
-  balance torque (soft = wobbly on purpose), noodle arms drawn to
-  server-computed hand positions, googly eyes that slosh around,
-  bobble antenna, scissoring cartoon legs
-- Controls (solo): WASD walk, Space jump, mouse look/aim, click grab
-  (hold click near an object to latch on; click on nothing = shove),
-  Q/E lean
-- Falling past ~70° tilt → comedy ragdoll spin → respawn after 3 s
-  ("CLANG!" / "TIMBER!" toasts)
-- Test area: flat ground, ramp, 5 crates, one very puntable beach ball
-- Grabbed objects are hugged to the chest with a capped grip force
-  (stuck objects stretch your grip instead of yanking you over);
-  held objects don't collide with the torso
-- Props that fall off the world respawn from the sky
+## What's built (everything)
 
-**Test it:** run it (see above), open http://localhost:3000, click, and
-walk around with WASD. Try punting the pink ball and picking up crates.
+### The mech
+- Huge, slow, deliberate: braking feet, thundering footstep THUDs with screen
+  shake, slow turns toward wherever the HEAD player looks.
+- ARMS: left/right fists punch with a windup (J/K work as backup keys).
+- LEGS: WASD to walk (relative to the LEGS player's own camera), SPACE to kick —
+  the kick hits like a truck but guts your balance mid-kick.
+- HEAD: mouse aims, holds fire to charge the eye laser — 3 s charge during which
+  the whole mech is rooted. The laser also roots the mech while firing.
+- Falls ragdoll comically for 3.5 s, then the mech gets back up where it fell
+  (brief mercy invulnerability after).
 
-### ⬜ Phase 2 — multiplayer (NEXT)
-- 4-letter room codes, join via shared link
-- Role split: LEGS / ARMS / HEAD+BALANCE (2 players: Legs+Balance and
-  Arms+Head)
-- Host starts the round; disconnect mid-round merges the lost role into
-  a teammate
-- Two browser tabs pilot one robot together
+### Roles (shuffle every round)
+- 1 pilot: everything. 2: LEGS / ARMS+HEAD. 3: LEGS / ARMS / HEAD.
+- 4: LEGS / LEFT ARM / RIGHT ARM / HEAD.
+- 5+: roles double up round-robin — two people sharing the legs is the premise,
+  not a bug.
+- Disconnect mid-run: the leaver's parts merge into a teammate (big on-screen
+  notice + new role banner).
 
-### ⬜ Phase 3 — obstacle course, checkpoints, rounds, scoreboard
-- Gaps, seesaw platforms, narrow beam, one swinging hazard
-- Checkpoint respawns, ~3-minute rounds, best-time display (co-op mode)
+### Kaiju Brawl (main mode)
+- Waves of CRABZILLA (angry crab, claw swipes) and PIGEONZILLA (pecks, and a
+  wing-gust that shoves the mech across the plaza). All attacks loudly
+  telegraphed; HP and damage scale each wave.
+- Kills pay credits -> between waves a 25 s shop: repairs, COMICALLY LARGE
+  FISTS, ESPRESSO LASER (faster charge), ROCKET PUNCH (whiffed punches launch
+  the fist), LEG ARMOR, LEG DAY PROTOCOL (walk speed).
+- One shared mech HP pool. Death = "MADE IT TO WAVE X" summary (kills, credits,
+  punches, kicks, lasers, faceplants) + ONE MORE RUN with rotated roles.
 
-### ⬜ Phase 4 — race mode + polish
-- Second crew, head-to-head race, automatic role shuffling each round
-- Sounds, ragdoll flair, funny role-assignment screen, "one more round"
+### Mech Duel
+- Two crews, two mechs, same combat systems, 160 HP each, win screen + rematch.
 
-### ⬜ Phase 5 — deploy to a real URL
+### Training Course
+- Timed objectives that teach every role: walk 3 rings, punch 2 cardboard
+  kaiju, kick over a crate tower, laser a balloon.
 
-## Notes / decisions made along the way
-- Gravity is stronger than Earth (-22) so falls feel snappy and comedic
-- Walking into the crate pile at full speed can trip the robot — kept
-  on purpose, it's funny and rewards careful crew driving
-- Carrying something at arm's length shifts your balance — the
-  HEAD/BALANCE player will need to lean against it (emergent teamwork!)
-- In solo mode lean is on Q/E (A/D are taken by walking); when roles
-  are split, the HEAD player leans with A/D as speced
-- Server tuning constants all live in `shared/constants.js`
+### Presentation
+- PEAK-ish look: painterly gradient sky, chunky flat-color city with lit
+  windows, parked cars, googly eyes + angry eyebrows on every monster.
+- Title screen, 30-second how-to-play, lobby with invite link + mode picker,
+  giant always-on "YOU ARE THE LEGS" role banner with key hints, crewmate
+  list, HP/laser/credit HUD, per-monster health bars, comedy toasts
+  ("BOOT!", "FLAP FLAP FLAP"), synthesized sfx for everything.
 
-## Gotcha for future sessions
-- cannon-es `applyForce(force, point)`: the 2nd argument is an offset
-  RELATIVE TO THE CENTER OF MASS, not a world position. Passing a world
-  position adds a huge phantom torque that flips the robot. (Cost us an
-  hour in Phase 1.)
+## Self-testing (all green)
+
+- `test/server-logic.test.js` — 24 checks: waves spawn, punches/kicks/laser
+  damage and kill, credits pay, shop applies/rejects purchases, movement locks
+  during laser charge, mech death ends the run with a summary, duel finds a
+  winner, training completes.
+- `test/rooms.test.js` — 24 checks over real websockets: 4-letter codes,
+  join (case-insensitive), bad-code rejection, host-only start, 3-player role
+  split, live position sync between clients, role-gated input (ARMS can't
+  walk), disconnect role-merge, duel crew assignment, training world,
+  AGAIN-with-rotated-roles, empty-room cleanup.
+- Headless-Chromium browser tests (Playwright): title -> create -> lobby ->
+  solo brawl, kill a crab -> credits -> shop -> buy gating -> next wave; and a
+  two-tab run: invite link, 2-player role split, shared mech moves for both
+  tabs, run-over screen, ONE MORE RUN role rotation, back-to-lobby -> duel with
+  opposing crews -> win screen; training objectives HUD. Zero console errors.
+- Production check: clean `git archive` -> `npm ci --omit=dev` ->
+  `PORT=8123 node server/index.js` -> all routes 200.
+
+## Judgment calls (the log)
+
+- **Combat aiming is per-player.** Punches go where the ARMS player's camera
+  points, the laser where the HEAD looks, walking is relative to the LEGS
+  player's camera. Maximum interdependence, maximum yelling.
+- **The mech turns to face the HEAD's camera.** The legs can walk any
+  direction, but the body slowly swings to the HEAD's view — so the HEAD
+  effectively steers everyone's punches. Argue about it.
+- **Anyone can spend the crew's shared credits in the shop.** Chaos is content.
+- **Kick self-knockback**: kicking shoves the kicker back a little. Physics
+  comedy, and it makes the "powerful but risky" promise true.
+- **Pigeon gust does zero damage** but launches the mech. Getting yeeted across
+  the plaza is funnier than losing HP.
+- **Monsters die by flipping upside down and sinking.** Never scary.
+- **J/K backup punch keys** so trackpad players (and automated tests) can box.
+- **Solo player gets laser on E** (mouse buttons are busy punching).
+- **After a run, only the host can restart or return the room to the lobby** —
+  prevents 8-person button mashing from eating the "one more round" moment.
+- **Spectators**: joining mid-run makes you a spectator; you're dealt in next
+  round automatically.
+- **Sunset palette** instead of noon: warmer, more PEAK, hides the fact that
+  boxes are boxes.
+- Gravity is -30 and the mech masses 60 units: everything lands with authority.
+
+## Deployment state
+
+The repo is deploy-ready for all three suggested hosts (single service, binds
+`process.env.PORT`, `/healthz` endpoint):
+- `render.yaml` — Render Blueprint (RECOMMENDED: free tier, websockets, zero config)
+- `Dockerfile` — works anywhere containers run
+- `fly.toml` — Fly.io
+- `railway.json` — Railway
+
+Creating/connecting the hosting account requires the repo owner's login
+(GitHub OAuth) — that's the one step that can't be done from this session.
+Click-by-click instructions are in PLAYTEST.md. Everything after that click is
+automatic.
+
+## Gotchas for future sessions
+
+- cannon-es `applyForce(force, point)`: the 2nd argument is an offset RELATIVE
+  TO THE CENTER OF MASS, not a world position. A world position there adds a
+  huge phantom torque that flips bodies instantly.
+- The mech hovers (no ground friction) — the explicit brake force in
+  `mech.js` is what stops it from ice-skating. Don't remove it.
+- Held/grabbed/constrained objects must not collide with the body holding
+  them (`collideConnected = false`) or the solver fights itself.
+- Server tests that let crabs maul the mech will hit the DEAD phase, which
+  freezes `game.step()` — reset `game.phase` before reusing a game instance.
+- Room loops (`setInterval`) are per-room and MUST be cleared in
+  `stopLoop()` paths (again/toLobby/dispose) or they leak.

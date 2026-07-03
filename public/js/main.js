@@ -45,6 +45,10 @@ $('btn-create').onclick = () => {
 };
 $('btn-join').onclick = joinFromInput;
 $('code-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinFromInput(); });
+$('name-input').addEventListener('keydown', (e) => {
+  // Enter in the name field: join if a code is filled in, otherwise create
+  if (e.key === 'Enter') ($('code-input').value.trim() ? joinFromInput() : $('btn-create').click());
+});
 function joinFromInput() {
   sfx.unlock(); sfx.click();
   const code = $('code-input').value.trim().toUpperCase();
