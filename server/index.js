@@ -13,6 +13,7 @@ app.use(express.static(path.join(root, 'public')));
 app.use('/shared', express.static(path.join(root, 'shared')));
 // Serve three.js straight out of node_modules — no build step needed.
 app.use('/vendor/three.module.js', express.static(path.join(root, 'node_modules/three/build/three.module.js')));
+app.use('/vendor/three-addons', express.static(path.join(root, 'node_modules/three/examples/jsm')));
 app.get('/healthz', (_req, res) => res.send('ok'));
 
 const server = http.createServer(app);

@@ -79,15 +79,46 @@ class Sfx {
     this.env(f, t, 0.05, 0.35, 0.32);
   }
 
-  clang(strong = 1) { // punch/kick lands
+  clang(strong = 1) { // punch/kick lands — with a chest-deep sub layer
     if (!this.ready()) return;
     const t = this.now();
     for (const [freq, amp] of [[210, 0.7], [335, 0.4], [523, 0.25]]) {
       const o = this.osc('square', freq * (0.9 + Math.random() * 0.2), t, 0.3);
       this.env(o, t, 0.004, amp * strong, 0.28);
     }
+    const sub = this.osc('sine', 55, t, 0.3);
+    sub.frequency.exponentialRampToValueAtTime(30, t + 0.26);
+    this.env(sub, t, 0.004, 0.9 * strong, 0.28);
     const n = this.noise(t, 0.12);
     this.env(n, t, 0.002, 0.5 * strong, 0.1);
+  }
+
+  ping() { // laser hitmarker
+    if (!this.ready()) return;
+    const t = this.now();
+    const o = this.osc('sine', 1560, t, 0.09);
+    this.env(o, t, 0.002, 0.22, 0.08);
+  }
+
+  splat() { // spitter glob lands
+    if (!this.ready()) return;
+    const t = this.now();
+    const o = this.osc('sine', 220, t, 0.25);
+    o.frequency.exponentialRampToValueAtTime(60, t + 0.2);
+    this.env(o, t, 0.005, 0.4, 0.22);
+    const n = this.noise(t, 0.18);
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = 1200;
+    n.connect(f);
+    this.env(f, t, 0.004, 0.35, 0.16);
+  }
+
+  screech(pitch = 1) { // flyer dive
+    if (!this.ready()) return;
+    const t = this.now();
+    const o = this.osc('sawtooth', 900 * pitch, t, 0.5);
+    o.frequency.exponentialRampToValueAtTime(420 * pitch, t + 0.45);
+    this.env(o, t, 0.02, 0.22, 0.45);
   }
 
   laserCharge(dur = 3) {

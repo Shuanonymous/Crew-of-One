@@ -2,7 +2,13 @@ import { Net } from '/js/net.js';
 import { Input } from '/js/input.js';
 import { Renderer } from '/js/render.js';
 import { sfx } from '/js/sfx.js';
+import { music } from '/js/music.js';
 import { ROLE, MODES, PHASE, SHOP, roleTitle, MECH } from '/shared/constants.js';
+
+function audioOn() {
+  sfx.unlock();
+  if (sfx.ctx) music.start(sfx.ctx, sfx.master);
+}
 
 // App flow: TITLE -> LOBBY -> GAME (hud + shop + end overlays) -> LOBBY...
 
@@ -36,11 +42,30 @@ function show(screen) {
     $(s).classList.toggle('hidden', s !== 'screen-' + screen);
   }
   $('hud').classList.toggle('hidden', screen !== 'game' && screen !== 'shop' && screen !== 'end');
+  if (screen === 'lobby' || screen === 'title' || screen === 'end') music.setState('lobby');
+  if (screen === 'shop') music.setState('shop');
+}
+
+// hitstop: freeze the world for a few frames when something lands HARD
+let freezeT = 0;
+function hitstop(ms) { freezeT = Math.max(freezeT, ms / 1000); }
+
+// floating damage numbers (DOM — crisp text, cheap, auto-cleaned)
+function dmgNumber(p, dmg, cls = '') {
+  const s = renderer.worldToScreen(p);
+  if (!s) return;
+  const el = document.createElement('div');
+  el.className = 'dmg-num ' + cls;
+  el.textContent = dmg;
+  el.style.left = (s.x + (Math.random() - 0.5) * 40) + 'px';
+  el.style.top = (s.y + (Math.random() - 0.5) * 16) + 'px';
+  $('dmg-layer').appendChild(el);
+  setTimeout(() => el.remove(), 950);
 }
 
 // ------------------------------------------------------------- title
 $('btn-create').onclick = () => {
-  sfx.unlock(); sfx.click();
+  audioOn(); sfx.click();
   net.send({ t: 'create', name: $('name-input').value });
 };
 $('btn-join').onclick = joinFromInput;
@@ -50,12 +75,12 @@ $('name-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') ($('code-input').value.trim() ? joinFromInput() : $('btn-create').click());
 });
 function joinFromInput() {
-  sfx.unlock(); sfx.click();
+  audioOn(); sfx.click();
   const code = $('code-input').value.trim().toUpperCase();
   if (code.length !== 4) return showError('Room codes are 4 letters');
   net.send({ t: 'join', code, name: $('name-input').value });
 }
-$('btn-howto').onclick = () => { sfx.unlock(); sfx.click(); show('howto'); };
+$('btn-howto').onclick = () => { audioOn(); sfx.click(); show('howto'); };
 $('btn-howto-back').onclick = () => { sfx.click(); show(state.room ? 'lobby' : 'title'); };
 
 function showError(msg) {
@@ -160,6 +185,7 @@ net.onGameStart = (msg) => {
   state.lastHp = -1;
 
   renderer.buildWorld(msg.world);
+  renderer.setPalette(0); // every run starts at golden hour
   show('game');
   updateRoleBanner();
   $('wave-pill').classList.toggle('hidden', msg.mode !== MODES.BRAWL);
@@ -185,7 +211,7 @@ net.onGameStart = (msg) => {
 };
 
 $('click-catch').onclick = () => {
-  sfx.unlock();
+  audioOn();
   input.requestLock();
 };
 
@@ -244,47 +270,77 @@ function myMech(snap) {
   return snap.mechs.find((m) => m.id === state.myMechId) || snap.mechs[0];
 }
 
+const ROAR_PITCH = { crab: 0.9, rusher: 1.8, tank: 0.45, boss: 0.32, spitter: 1.2, swarmling: 2.4 };
+const KILL_TEXT = {
+  crab: 'CRAB CRACKED', pigeon: 'PIGEON DOWN', rusher: 'SCUTTLER SQUISHED',
+  spitter: 'SPITTER SPLATTED', tank: 'TANK SCRAPPED', flyer: 'FLYER GROUNDED',
+  swarmling: 'GRABLIN GONE', boss: 'BOSS DEFEATED!!',
+};
+
 function handleEvents(snap) {
   const mine = myMech(snap);
   for (const mech of snap.mechs) {
     const isMine = mech.id === mine.id;
     for (const ev of mech.ev || []) {
       switch (ev.what) {
-        case 'step': if (isMine) { sfx.thud(1); renderer.shake(0.16); } else sfx.thud(0.5); break;
+        case 'step': if (isMine) { sfx.thud(1); renderer.shake(0.14); } else sfx.thud(0.5); break;
         case 'punchWindup': sfx.whoosh(); break;
-        case 'punchHit': sfx.clang(1); renderer.shake(0.35); renderer.burst(mech.p, '#f5d76e', 10); break;
+        case 'punchHit': sfx.clang(1.1); renderer.shake(0.4); hitstop(80); renderer.burst(mech.p, '#f5d76e', 12); break;
         case 'punchMiss': break;
         case 'kickWindup': sfx.whoosh(); break;
-        case 'kickHit': sfx.clang(1.6); renderer.shake(0.6); renderer.burst(mech.p, '#f5d76e', 16); toast('BOOT!'); break;
+        case 'kickHit':
+          sfx.clang(1.7); renderer.shake(0.75); hitstop(110);
+          renderer.burst(mech.p, '#f5d76e', 20); renderer.ring(mech.p, '#ffd9a0', 12, 0.5);
+          toast('BOOT!');
+          break;
         case 'kickMiss': if (isMine) toast('WHIFF'); break;
         case 'laserCharge': if (isMine) sfx.laserCharge(mech.up?.laser ? 1.7 : MECH.laser.chargeTime); break;
-        case 'laserFire': sfx.laserFire(); renderer.shake(0.5); break;
+        case 'laserFire': sfx.laserFire(2.4); renderer.shake(0.55); break;
         case 'laserFizzle': if (isMine) { sfx.fizzle(); toast('FIZZLE…'); } break;
         case 'rocketFire': sfx.rocket(); break;
-        case 'rocketHit': sfx.clang(1.3); renderer.shake(0.3); break;
-        case 'hurt': if (isMine) { sfx.hurt(); renderer.shake(0.45); } break;
-        case 'fell': sfx.crash(1.5); renderer.shake(1.0); toast(pick(['TIMBER!', 'CLANG!', 'MECH DOWN!'])); renderer.dust(mech.p, 18); break;
+        case 'rocketHit': sfx.clang(1.3); renderer.shake(0.35); hitstop(70); if (ev.p) renderer.ring(ev.p, '#f5d76e', 8, 0.4); break;
+        case 'hurt': if (isMine) { sfx.hurt(); renderer.shake(Math.min(1, 0.25 + (ev.dmg || 5) * 0.03)); } break;
+        case 'fell': sfx.crash(1.5); renderer.shake(1.1); toast(pick(['TIMBER!', 'CLANG!', 'MECH DOWN!'])); renderer.dust(mech.p, 22); renderer.ring(mech.p, '#cbb9a0', 16, 0.7); break;
         case 'getUp': if (isMine) toast('BACK UP!'); break;
-        case 'die': if (isMine) { renderer.shake(1.2); } break;
+        case 'die': if (isMine) { renderer.shake(1.3); } break;
+        case 'dmgNum': dmgNumber(ev.p, ev.dmg, ev.laser ? 'laser' : ev.dmg >= 30 ? 'big' : ''); if (ev.laser) sfx.ping(); break;
       }
     }
   }
   for (const mon of snap.monsters || []) {
     for (const ev of mon.ev || []) {
       switch (ev.what) {
-        case 'roar': mon.type === 'pigeon' ? sfx.coo() : sfx.roar(0.9); break;
-        case 'telegraph': mon.type === 'pigeon' ? sfx.coo() : sfx.roar(1.15); break;
-        case 'hit': renderer.burst(mon.p, '#ef767a', 6, 9); break;
-        case 'die': sfx.squish(); renderer.burst(mon.p, mon.type === 'pigeon' ? '#c6ccd6' : '#e2543e', 22, 16); break;
+        case 'roar':
+          if (mon.type === 'pigeon') sfx.coo();
+          else if (mon.type === 'flyer') sfx.screech(1.2);
+          else sfx.roar(ROAR_PITCH[mon.type] || 0.9);
+          break;
+        case 'telegraph':
+          if (ev.kind === 'dive') sfx.screech(1);
+          else if (mon.type === 'pigeon') sfx.coo();
+          else sfx.roar((ROAR_PITCH[mon.type] || 0.9) * 1.2);
+          break;
+        case 'hit': renderer.flashMonster(mon.id); renderer.burst(mon.p, '#ffd166', 6, 10); break;
+        case 'die': sfx.squish(); renderer.burst(mon.p, '#e2543e', mon.type === 'boss' ? 40 : 20, 16); if (mon.type === 'boss') { renderer.ring(mon.p, '#ffd166', 24, 0.9); renderer.shake(1); } break;
         case 'gustHit': renderer.shake(0.7); toast('FLAP FLAP FLAP'); break;
+        case 'slam': sfx.crash(2); renderer.shake(1.2); if (ev.p) renderer.ring(ev.p, '#ff7b5c', ev.range || 17, 0.8); break;
+        case 'summon': toast('IT CALLED FOR BACKUP'); sfx.roar(1.5); break;
+        case 'spit': sfx.splat(); break;
+        case 'latch': sfx.roar(2.6); break;
         case 'strikeHit': break;
       }
     }
   }
   for (const ev of snap.ev || []) {
     switch (ev.what) {
-      case 'kill': sfx.ding(); toast(`+${ev.credits}© ${ev.type === 'pigeon' ? 'PIGEON DOWN' : 'CRAB CRACKED'}`); break;
-      case 'waveStart': banner(`WAVE ${ev.wave} — ${ev.count} INCOMING`, 2600); (myMech(snap)) && sfx.roar(0.8); break;
+      case 'kill': sfx.ding(); toast(`+${ev.credits}© ${KILL_TEXT[ev.type] || 'KAIJU DOWN'}`); break;
+      case 'waveStart': {
+        renderer.setPalette(ev.wave - 1);
+        if (ev.boss) { banner(`⚠ ${ev.boss} ⚠`, 3400); sfx.roar(0.3); }
+        else banner(`WAVE ${ev.wave} — ${ev.count} INCOMING`, 2600);
+        sfx.roar(0.8);
+        break;
+      }
       case 'waveClear': sfx.fanfare(); banner(`WAVE ${ev.wave} CLEAR!`, 2400); break;
       case 'buy': sfx.buy(); toast(ev.item + '!'); break;
       case 'runOver': sfx.sad(); break;
@@ -293,6 +349,8 @@ function handleEvents(snap) {
       case 'balloonPop': sfx.pop(); toast('POP!'); break;
       case 'cratesToppled': sfx.clang(1.2); toast('TIMBERRR!'); break;
       case 'trainingDone': sfx.fanfare(); break;
+      case 'splat': sfx.splat(); if (ev.p) renderer.burst(ev.p, '#9dff5c', 10, 8); if (ev.hit) renderer.shake(0.4); break;
+      case 'carHit': sfx.clang(0.7); if (ev.p) renderer.burst(ev.p, '#8ad6e6', 8, 12); break;
     }
   }
 }
@@ -329,6 +387,27 @@ function updateHud(snap) {
   if (state.myRoles.includes(ROLE.HEAD)) {
     const c = mine.laser.firing ? 1 : mine.laser.charge;
     $('laser-fill').style.width = (c * 100) + '%';
+  }
+
+  // boss bar + adaptive music intensity
+  if (snap.bossBar) {
+    $('boss-bar').classList.remove('hidden');
+    $('boss-name').textContent = snap.bossBar.name;
+    $('boss-hp-fill').style.width = Math.max(0, snap.bossBar.hp / snap.bossBar.maxHp * 100) + '%';
+  } else {
+    $('boss-bar').classList.add('hidden');
+  }
+  if (state.screen === 'game' && snap.phase === PHASE.FIGHT) {
+    music.setState(snap.bossBar ? 'boss' : 'wave');
+  }
+
+  // laser scorch marks where the beam meets the street
+  if (mine.laser.firing && mine.laser.to && mine.laser.to[1] < 2.5) {
+    if (!state.lastScorch || performance.now() - state.lastScorch > 140) {
+      state.lastScorch = performance.now();
+      renderer.scorch(mine.laser.to, 2.2 + Math.random() * 1.4);
+      renderer.burst(mine.laser.to, '#e2a8ff', 4, 10);
+    }
   }
 
   if (state.mode === MODES.TRAINING && snap.objectives) {
@@ -453,15 +532,21 @@ show('title');
 
 let last = performance.now();
 function frame(now) {
-  const dt = Math.min(0.1, (now - last) / 1000);
+  let dt = Math.min(0.1, (now - last) / 1000);
   last = now;
+  // hitstop: the world holds its breath for a few frames on big impacts
+  if (freezeT > 0) {
+    freezeT -= dt;
+    dt = 0;
+  }
   if (state.playing) {
-    const sample = net.sample();
-    if (sample) renderer.applySample(sample, dt, state.myMechId);
-    renderer.updateCamera(input.yaw, input.pitch, state.myMechId, dt);
+    if (dt > 0) {
+      const sample = net.sample();
+      if (sample) renderer.applySample(sample, dt, state.myMechId);
+    }
+    renderer.updateCamera(input.yaw, input.pitch, state.myMechId, Math.max(dt, 0.0001));
   } else {
-    // idle title-screen camera: slow orbit over the (empty or last) city
-    renderer.updateCamera(now / 9000, -0.28, null, dt);
+    renderer.updateCamera(now / 9000, -0.28, null, Math.max(dt, 0.0001));
   }
   renderer.render();
   requestAnimationFrame(frame);

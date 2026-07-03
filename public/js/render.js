@@ -1,10 +1,27 @@
 import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { MECH } from '/shared/constants.js';
 
-// Everything visual. Style goals: bold flat colors, chunky low-poly
-// shapes, a painterly gradient sky, and a mech that reads as HEAVY.
+// Everything visual. Style goals: stylized-cinematic — chunky low-poly
+// geometry under dramatic golden-hour light, painterly gradient skies
+// that shift as the run goes on, bloom on anything that glows.
 
 const V3 = THREE.Vector3;
+
+// The run is a journey: sunset -> dusk -> neon night -> dawn, per wave.
+const PALETTES = [
+  { name: 'sunset', sky: ['#5d7ec9', '#9b8fd4', '#f2a08a', '#f9c46b'], fog: '#e89a80',
+    hemi: ['#ffe8c9', '#6b5d8f'], sun: '#ffc27d', sunI: 2.2, sunPos: [80, 38, 30], amb: 1.0, sunDisc: '#ffd9a0' },
+  { name: 'dusk', sky: ['#2c2a5e', '#5d4a8f', '#b0628f', '#e8896b'], fog: '#8f5a7a',
+    hemi: ['#d9b8ff', '#3d3660'], sun: '#ff9d76', sunI: 1.5, sunPos: [90, 22, 60], amb: 0.8, sunDisc: '#ffb08a' },
+  { name: 'neon', sky: ['#0d0d26', '#1d1b45', '#31255e', '#4a2a66'], fog: '#2a2050',
+    hemi: ['#7d9df0', '#1d1433'], sun: '#8aa5ff', sunI: 0.8, sunPos: [-60, 55, -40], amb: 0.65, sunDisc: '#e8ecff' },
+  { name: 'dawn', sky: ['#3d6a9e', '#7fa3c9', '#f2c4a0', '#ffe9b8'], fog: '#d9b8a0',
+    hemi: ['#fff2d9', '#5d6a8f'], sun: '#fff0c9', sunI: 1.9, sunPos: [-80, 30, 40], amb: 1.05, sunDisc: '#fff6dd' },
+];
 
 export class Renderer {
   constructor(canvas) {
@@ -14,35 +31,93 @@ export class Renderer {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.scene = new THREE.Scene();
-    this.scene.background = makeSkyTexture();
-    this.scene.fog = new THREE.Fog('#f2a08a', 90, 300);
+    this.skyCanvas = document.createElement('canvas');
+    this.skyCanvas.width = 2; this.skyCanvas.height = 512;
+    this.skyTex = new THREE.CanvasTexture(this.skyCanvas);
+    this.skyTex.colorSpace = THREE.SRGBColorSpace;
+    this.scene.background = this.skyTex;
+    this.scene.fog = new THREE.Fog('#e89a80', 90, 320);
 
-    this.camera = new THREE.PerspectiveCamera(65, 1, 0.1, 600);
+    this.camera = new THREE.PerspectiveCamera(65, 1, 0.1, 900);
     this.camDist = 30;
-    this.trauma = 0;          // screen shake fuel
+    this.trauma = 0;
     this.camPos = new V3(0, 20, 40);
 
-    const hemi = new THREE.HemisphereLight('#ffe8c9', '#6b5d8f', 1.0);
-    this.scene.add(hemi);
-    this.sun = new THREE.DirectionalLight('#ffd9a0', 1.7);
-    this.sun.position.set(60, 90, 30);
+    this.hemi = new THREE.HemisphereLight('#ffe8c9', '#6b5d8f', 1.0);
+    this.scene.add(this.hemi);
+    this.sun = new THREE.DirectionalLight('#ffc27d', 2.2);
+    this.sun.position.set(80, 38, 30); // low sun = long dramatic shadows
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    const S = 90;
+    const S = 95;
     this.sun.shadow.camera.left = -S; this.sun.shadow.camera.right = S;
     this.sun.shadow.camera.top = S; this.sun.shadow.camera.bottom = -S;
-    this.sun.shadow.camera.far = 300;
+    this.sun.shadow.camera.far = 400;
     this.scene.add(this.sun);
+    // cool rim light from behind so the mech pops off the sky
+    this.rim = new THREE.DirectionalLight('#8aa5ff', 0.7);
+    this.rim.position.set(-50, 35, -60);
+    this.scene.add(this.rim);
+
+    // giant low sun/moon disc (blooms nicely)
+    this.sunDisc = new THREE.Mesh(
+      new THREE.CircleGeometry(60, 40),
+      new THREE.MeshBasicMaterial({ color: '#ffd9a0', fog: false })
+    );
+    this.sunDisc.position.set(400, 60, 150);
+    this.sunDisc.lookAt(0, 0, 0);
+    this.scene.add(this.sunDisc);
+
+    // silhouetted skyline rings — the city goes on forever
+    this.silhouettes = new THREE.Group();
+    const silMat = new THREE.MeshBasicMaterial({ color: '#241f42', fog: false });
+    const rng0 = mulberry32(3);
+    for (let ring = 0; ring < 2; ring++) {
+      const r = 200 + ring * 90;
+      for (let i = 0; i < 42; i++) {
+        const a = (i / 42) * Math.PI * 2 + ring * 0.07;
+        const h = 25 + rng0() * (55 + ring * 40);
+        const w = 18 + rng0() * 26;
+        const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), silMat);
+        b.position.set(Math.cos(a) * r, h / 2 - 4, Math.sin(a) * r);
+        this.silhouettes.add(b);
+      }
+    }
+    this.scene.add(this.silhouettes);
+
+    // drifting embers / dust motes
+    this.embers = [];
+    const emberMat = new THREE.MeshBasicMaterial({ color: '#ffcf8a', transparent: true, opacity: 0.75 });
+    for (let i = 0; i < 70; i++) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.28), emberMat);
+      m.position.set((Math.random() - 0.5) * 130, Math.random() * 30 + 1, (Math.random() - 0.5) * 130);
+      this.scene.add(m);
+      this.embers.push({ m, vy: 0.4 + Math.random() * 0.8, ph: Math.random() * 9 });
+    }
 
     this.worldGroup = new THREE.Group();
     this.scene.add(this.worldGroup);
     this.mechViews = new Map();
     this.monsterViews = new Map();
     this.crateMeshes = [];
+    this.propMeshes = new Map();   // cars
+    this.projMeshes = new Map();   // spitter globs
     this.ringViews = [];
     this.balloonView = null;
     this.particles = [];
+    this.effects = [];             // shockwave rings, scorch marks
     this.windowTex = makeWindowTexture();
+
+    // palette state (lerped on wave changes)
+    this.palA = PALETTES[0]; this.palB = PALETTES[0]; this.palT = 1;
+    this.applyPalette(this.palA, this.palA, 1);
+
+    // bloom pipeline: only genuinely bright things glow
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.55, 0.5, 0.82);
+    this.composer.addPass(this.bloom);
+    this.composer.addPass(new OutputPass());
 
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -51,11 +126,123 @@ export class Renderer {
   resize() {
     const w = window.innerWidth, h = window.innerHeight;
     this.renderer.setSize(w, h);
+    this.composer?.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
 
-  shake(amount) { this.trauma = Math.min(1.4, this.trauma + amount); }
+  shake(amount) { this.trauma = Math.min(1.6, this.trauma + amount); }
+
+  // ------------------------------------------------ palettes / atmosphere
+  setPalette(i) {
+    this.palA = this.currentPalette();
+    this.palB = PALETTES[((i % PALETTES.length) + PALETTES.length) % PALETTES.length];
+    this.palT = 0;
+  }
+
+  currentPalette() {
+    // sample the in-flight blend so transitions can restart smoothly
+    const t = this.palT, a = this.palA, b = this.palB;
+    const mix = (x, y) => '#' + new THREE.Color(x).lerp(new THREE.Color(y), t).getHexString();
+    return {
+      sky: a.sky.map((c, i) => mix(c, b.sky[i])),
+      fog: mix(a.fog, b.fog),
+      hemi: [mix(a.hemi[0], b.hemi[0]), mix(a.hemi[1], b.hemi[1])],
+      sun: mix(a.sun, b.sun),
+      sunI: a.sunI + (b.sunI - a.sunI) * t,
+      sunPos: a.sunPos.map((v, i) => v + (b.sunPos[i] - v) * t),
+      amb: a.amb + (b.amb - a.amb) * t,
+      sunDisc: mix(a.sunDisc, b.sunDisc),
+    };
+  }
+
+  applyPalette(pal) {
+    const ctx = this.skyCanvas.getContext('2d');
+    const grad = ctx.createLinearGradient(0, 0, 0, 512);
+    grad.addColorStop(0, pal.sky[0]);
+    grad.addColorStop(0.45, pal.sky[1]);
+    grad.addColorStop(0.72, pal.sky[2]);
+    grad.addColorStop(1, pal.sky[3]);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 2, 512);
+    this.skyTex.needsUpdate = true;
+    this.scene.fog.color.set(pal.fog);
+    this.hemi.color.set(pal.hemi[0]);
+    this.hemi.groundColor.set(pal.hemi[1]);
+    this.hemi.intensity = pal.amb;
+    this.sun.color.set(pal.sun);
+    this.sun.intensity = pal.sunI;
+    this.sun.position.set(...pal.sunPos);
+    this.sunDisc.material.color.set(pal.sunDisc);
+    this.sunDisc.position.set(pal.sunPos[0] * 5, Math.max(35, pal.sunPos[1] * 2.2), pal.sunPos[2] * 5);
+    this.sunDisc.lookAt(0, 40, 0);
+  }
+
+  stepAtmosphere(dt) {
+    if (this.palT < 1) {
+      this.palT = Math.min(1, this.palT + dt / 3.5);
+      this.applyPalette(this.currentPalette());
+    }
+    const t = performance.now() / 1000;
+    for (const e of this.embers) {
+      e.m.position.y += e.vy * dt;
+      e.m.position.x += Math.sin(t * 0.6 + e.ph) * dt * 0.8;
+      if (e.m.position.y > 32) e.m.position.y = 0.5;
+      e.m.quaternion.copy(this.camera.quaternion);
+      e.m.material.opacity = 0.4 + 0.35 * Math.sin(t * 2 + e.ph);
+    }
+  }
+
+  // ------------------------------------------------------- effect spawns
+  ring(pos, color = '#ffd9a0', maxR = 14, dur = 0.55) {
+    const m = new THREE.Mesh(
+      new THREE.RingGeometry(0.8, 1.35, 40),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, side: THREE.DoubleSide })
+    );
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(pos[0], Math.max(0.25, pos[1] - 6), pos[2]);
+    this.scene.add(m);
+    this.effects.push({ m, t: 0, dur, maxR, kind: 'ring' });
+  }
+
+  scorch(pos, r = 3.2) {
+    const m = new THREE.Mesh(
+      new THREE.CircleGeometry(r, 20),
+      new THREE.MeshBasicMaterial({ color: '#14101f', transparent: true, opacity: 0.75 })
+    );
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(pos[0], 0.08 + Math.random() * 0.03, pos[2]);
+    this.scene.add(m);
+    this.effects.push({ m, t: 0, dur: 11, kind: 'scorch' });
+    // keep the pool bounded
+    const scorches = this.effects.filter((e) => e.kind === 'scorch');
+    if (scorches.length > 26) { const old = scorches[0]; old.t = old.dur; }
+  }
+
+  stepEffects(dt) {
+    for (const e of this.effects) {
+      e.t += dt;
+      const k = e.t / e.dur;
+      if (e.kind === 'ring') {
+        const s = 1 + (e.maxR - 1) * easeOut(Math.min(1, k));
+        e.m.scale.set(s, s, 1);
+        e.m.material.opacity = 0.95 * (1 - k);
+      } else if (e.kind === 'scorch') {
+        e.m.material.opacity = 0.75 * (1 - Math.max(0, k - 0.7) / 0.3);
+      }
+      if (e.t >= e.dur) this.scene.remove(e.m);
+    }
+    this.effects = this.effects.filter((e) => e.t < e.dur);
+  }
+
+  worldToScreen(p) {
+    const v = new V3(p[0], p[1], p[2]).project(this.camera);
+    if (v.z > 1) return null; // behind the camera
+    return {
+      x: (v.x * 0.5 + 0.5) * window.innerWidth,
+      y: (-v.y * 0.5 + 0.5) * window.innerHeight,
+    };
+  }
 
   // ------------------------------------------------------------ world
   clearWorld() {
@@ -108,6 +295,7 @@ export class Renderer {
         roof.position.set(d.p[0], d.p[1] + d.size[1] / 2 + 0.4, d.p[2]);
         roof.rotation.y = d.yaw || 0;
         g.add(roof);
+        this.decorateBuilding(g, d);
       }
     }
 
@@ -151,19 +339,73 @@ export class Renderer {
       }
     }
 
-    // decorative confetti of tiny "cars" parked around the plaza
-    const rng = mulberry32(99);
-    for (let i = 0; i < 24; i++) {
-      const a = rng() * Math.PI * 2;
-      const r = (world.arenaRadius || 48) * (0.5 + rng() * 0.45);
-      const car = new THREE.Mesh(
-        new THREE.BoxGeometry(2.6, 1.1, 1.4),
-        new THREE.MeshLambertMaterial({ color: ['#ef767a', '#7d9df0', '#f5d76e', '#6fc2a0', '#ffffff'][i % 5] })
+    // dynamic props from the server (puntable cars)
+    this.propMeshes.clear();
+    for (const d of world.props || []) {
+      const car = new THREE.Group();
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(d.size[0], d.size[1] * 0.6, d.size[2]),
+        new THREE.MeshLambertMaterial({ color: d.color })
       );
-      car.position.set(Math.cos(a) * r, 0.55, Math.sin(a) * r);
-      car.rotation.y = rng() * Math.PI * 2;
-      car.castShadow = true;
+      body.castShadow = true;
+      const cabin = new THREE.Mesh(
+        new THREE.BoxGeometry(d.size[0] * 0.55, d.size[1] * 0.5, d.size[2] * 0.85),
+        new THREE.MeshLambertMaterial({ color: '#1d2033' })
+      );
+      cabin.position.y = d.size[1] * 0.5;
+      car.add(body, cabin);
       g.add(car);
+      this.propMeshes.set(d.id, car);
+    }
+  }
+
+  // client-side rooftop garnish: water towers, AC units, antennas, neon
+  decorateBuilding(g, d) {
+    const h = hashStr(d.p[0] + ',' + d.p[2]);
+    const topY = d.p[1] + d.size[1] / 2;
+    if (h % 5 === 0) {
+      // water tower
+      const tw = new THREE.Group();
+      const tank = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.8, 3, 9),
+        new THREE.MeshLambertMaterial({ color: '#7a5a48' }));
+      tank.position.y = 2.6;
+      const lid = new THREE.Mesh(new THREE.ConeGeometry(2, 1.2, 9),
+        new THREE.MeshLambertMaterial({ color: '#5d4438' }));
+      lid.position.y = 4.7;
+      tw.add(tank, lid);
+      for (let i = 0; i < 3; i++) {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.4),
+          new THREE.MeshLambertMaterial({ color: '#3d3244' }));
+        const a = (i / 3) * Math.PI * 2;
+        leg.position.set(Math.cos(a) * 1.2, 1.2, Math.sin(a) * 1.2);
+        tw.add(leg);
+      }
+      tw.position.set(d.p[0], topY, d.p[2]);
+      g.add(tw);
+    } else if (h % 5 === 1) {
+      const ac = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.3, 2.2),
+        new THREE.MeshLambertMaterial({ color: shade(d.color, 0.5) }));
+      ac.position.set(d.p[0] + 1, topY + 0.65, d.p[2] - 1);
+      g.add(ac);
+    } else if (h % 5 === 2) {
+      const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.14, 5),
+        new THREE.MeshLambertMaterial({ color: '#2b2d42' }));
+      ant.position.set(d.p[0], topY + 2.5, d.p[2]);
+      g.add(ant);
+      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.24, 6, 6),
+        new THREE.MeshBasicMaterial({ color: '#ff4d5e' }));
+      tip.position.set(d.p[0], topY + 5.1, d.p[2]);
+      g.add(tip);
+    }
+    if (h % 3 === 0 && d.size[1] > 14) {
+      // neon strip partway up a facade — blooms at night
+      const neon = new THREE.Mesh(
+        new THREE.BoxGeometry(Math.min(6, d.size[0] * 0.6), 1.1, 0.25),
+        new THREE.MeshBasicMaterial({ color: ['#ff5da2', '#4dfff0', '#ffe14d', '#8aff6b'][h % 4] })
+      );
+      neon.position.set(d.p[0], d.p[1] + d.size[1] * 0.18, d.p[2] + d.size[2] / 2 + 0.2);
+      neon.rotation.y = d.yaw || 0;
+      g.add(neon);
     }
   }
 
@@ -187,13 +429,42 @@ export class Renderer {
       const ma = a.monsters.find((m) => m.id === mb.id) || mb;
       let view = this.monsterViews.get(mb.id);
       if (!view) {
-        view = mb.type === 'pigeon' ? new PigeonView(this.scene) : new CrabView(this.scene);
+        view = makeMonsterView(this.scene, mb.type);
         this.monsterViews.set(mb.id, view);
       }
       view.apply(ma, mb, alpha, dt);
     }
     for (const [id, view] of this.monsterViews) {
       if (!seen.has(id)) { view.dispose(this.scene); this.monsterViews.delete(id); }
+    }
+
+    // cars
+    for (const pb of b.props || []) {
+      const mesh = this.propMeshes.get(pb.id);
+      if (!mesh) continue;
+      const pa = (a.props || []).find((p) => p.id === pb.id) || pb;
+      mesh.position.set(lerp(pa.p[0], pb.p[0], alpha), lerp(pa.p[1], pb.p[1], alpha), lerp(pa.p[2], pb.p[2], alpha));
+      const qa = new THREE.Quaternion(...pa.q), qb = new THREE.Quaternion(...pb.q);
+      mesh.quaternion.copy(qa.slerp(qb, alpha));
+    }
+
+    // spitter globs
+    const seenPj = new Set();
+    for (const pj of b.projs || []) {
+      seenPj.add(pj.id);
+      let m = this.projMeshes.get(pj.id);
+      if (!m) {
+        m = new THREE.Mesh(new THREE.IcosahedronGeometry(1.3, 1),
+          new THREE.MeshBasicMaterial({ color: '#9dff5c' }));
+        this.scene.add(m);
+        this.projMeshes.set(pj.id, m);
+      }
+      const pa = (a.projs || []).find((p) => p.id === pj.id) || pj;
+      m.position.set(lerp(pa.p[0], pj.p[0], alpha), lerp(pa.p[1], pj.p[1], alpha), lerp(pa.p[2], pj.p[2], alpha));
+      m.scale.setScalar(0.9 + Math.sin(performance.now() / 60) * 0.15);
+    }
+    for (const [id, m] of this.projMeshes) {
+      if (!seenPj.has(id)) { this.scene.remove(m); this.projMeshes.delete(id); }
     }
 
     if (b.crates && this.crateMeshes.length) {
@@ -273,9 +544,36 @@ export class Renderer {
     );
     this.camera.position.copy(this.camPos).add(off);
     this.camera.lookAt(target.add(off.clone().multiplyScalar(0.5)));
+    CAMERA_Q.copy(this.camera.quaternion);
+
+    this.stepAtmosphere(dt);
+    this.stepEffects(dt);
   }
 
-  render() { this.renderer.render(this.scene, this.camera); }
+  flashMonster(id) {
+    this.monsterViews.get(id)?.flash?.();
+  }
+
+  render() { this.composer.render(); }
+}
+
+const VIEW_STYLES = {
+  crab: { cls: 'crab', scale: 1, shell: '#e2543e', belly: '#f2a08a', dark: '#8f2d1e', scuttleRate: 9 },
+  rusher: { cls: 'crab', scale: 0.55, shell: '#4dc9b0', belly: '#9de8d8', dark: '#1f7a68', scuttleRate: 20 },
+  tank: { cls: 'crab', scale: 1.75, shell: '#5c6270', belly: '#8a8f9e', dark: '#31353f', scuttleRate: 4, armored: true },
+  boss: { cls: 'crab', scale: 2.6, shell: '#b03052', belly: '#e08a8a', dark: '#5c1a30', scuttleRate: 5, crown: true },
+  spitter: { cls: 'spitter' },
+  flyer: { cls: 'flyer' },
+  swarmling: { cls: 'swarm' },
+  pigeon: { cls: 'pigeon' },
+};
+function makeMonsterView(scene, type) {
+  const st = VIEW_STYLES[type] || VIEW_STYLES.crab;
+  if (st.cls === 'pigeon') return new PigeonView(scene);
+  if (st.cls === 'spitter') return new SpitterView(scene);
+  if (st.cls === 'flyer') return new FlyerView(scene);
+  if (st.cls === 'swarm') return new SwarmView(scene);
+  return new CrabView(scene, st);
 }
 
 // ===========================================================================
@@ -327,13 +625,15 @@ class MechView {
     );
     this.eye.position.set(0, 0.12, -1.05);
     this.head.add(this.eye);
-    const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.1), dark);
-    antenna.position.set(0.7, 1.3, 0);
+    // rigid blade antenna with a slow-blinking warning light (not a bobble —
+    // this thing is a weapons platform, not a toy)
+    const antenna = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.4, 0.28), dark);
+    antenna.position.set(0.7, 1.4, 0);
     this.head.add(antenna);
-    this.bobble = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8),
-      new THREE.MeshLambertMaterial({ color: '#ef767a' }));
-    this.bobble.position.set(0.7, 1.95, 0);
-    this.head.add(this.bobble);
+    this.blinker = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8),
+      new THREE.MeshBasicMaterial({ color: '#ff4d5e' }));
+    this.blinker.position.set(0.7, 2.15, 0);
+    this.head.add(this.blinker);
 
     // legs
     this.legs = [];
@@ -373,19 +673,39 @@ class MechView {
       this.arms[side] = { s, upper, fore, elbow, fist, pos: new V3() };
     }
 
-    // laser beam
+    // laser: bright core + wide soft sheath (bloom does the rest)
     this.beam = new THREE.Mesh(
       new THREE.CylinderGeometry(0.55, 0.55, 1, 10),
-      new THREE.MeshBasicMaterial({ color: '#c95efb', transparent: true, opacity: 0.9 })
+      new THREE.MeshBasicMaterial({ color: '#ffffff' })
     );
     this.beam.visible = false;
     scene.add(this.beam);
+    this.beamSheath = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.4, 1.4, 1, 12),
+      new THREE.MeshBasicMaterial({ color: '#c95efb', transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    this.beamSheath.visible = false;
+    scene.add(this.beamSheath);
     this.beamGlow = new THREE.Mesh(
-      new THREE.SphereGeometry(1.6, 10, 8),
-      new THREE.MeshBasicMaterial({ color: '#e9c1ff', transparent: true, opacity: 0.8 })
+      new THREE.SphereGeometry(1.9, 10, 8),
+      new THREE.MeshBasicMaterial({ color: '#f3d9ff', transparent: true, opacity: 0.85 })
     );
     this.beamGlow.visible = false;
     scene.add(this.beamGlow);
+
+    // targeting guide: the whole crew sees where the HEAD is pointing
+    this.guide = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.09, 0.09, 1, 6),
+      new THREE.MeshBasicMaterial({ color: '#c95efb', transparent: true, opacity: 0.5, depthWrite: false })
+    );
+    this.guide.visible = false;
+    scene.add(this.guide);
+    this.reticle = new THREE.Mesh(
+      new THREE.RingGeometry(0.9, 1.3, 24),
+      new THREE.MeshBasicMaterial({ color: '#c95efb', transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false })
+    );
+    this.reticle.visible = false;
+    scene.add(this.reticle);
 
     // rocket fists
     this.rocketMeshes = [];
@@ -395,7 +715,7 @@ class MechView {
   }
 
   dispose(scene) {
-    scene.remove(this.root, this.beam, this.beamGlow);
+    scene.remove(this.root, this.beam, this.beamSheath, this.beamGlow, this.guide, this.reticle);
     for (const side of ['L', 'R']) {
       const a = this.arms[side];
       scene.remove(a.upper, a.fore, a.elbow, a.fist);
@@ -428,9 +748,10 @@ class MechView {
     this.eye.scale.setScalar(chargeScale + (charge > 0 ? Math.random() * 0.3 : 0));
     this.eye.material.color.set(mb.laser.firing ? '#f3d9ff' : charge > 0 ? '#c95efb' : '#7d5f96');
 
-    // bobble antenna physics-lite
-    this.bobble.position.x = 0.7 + clampN(-this.velocity.x * 0.01, 0.3);
-    this.bobble.position.z = clampN(-this.velocity.z * 0.01, 0.3);
+    // warning light blinks slowly, glows harder while charging
+    const blink = (Math.sin(performance.now() / 450) + 1) / 2;
+    this.blinker.material.color.setRGB(1, 0.2 + blink * 0.2, 0.3);
+    this.blinker.scale.setScalar(0.8 + blink * 0.5 + charge * 1.2);
 
     // legs
     const kick = mb.kick;
@@ -454,18 +775,41 @@ class MechView {
       this.poseArm(side, mb, alpha, dt);
     }
 
-    // laser beam
+    // laser beam + crew-visible targeting guide
+    const eyeWorld = new V3(0, 0.12, -1.05).applyMatrix4(this.head.matrixWorld);
     if (mb.laser.firing && mb.laser.from && mb.laser.to) {
       const from = new V3(...mb.laser.from), to = new V3(...mb.laser.to);
       placeBeam(this.beam, from, to);
-      this.beam.visible = true;
-      this.beam.material.opacity = 0.75 + Math.random() * 0.25;
+      placeBeam(this.beamSheath, from, to);
+      const pulse = 0.9 + Math.random() * 0.35;
+      this.beam.scale.x = pulse; this.beam.scale.z = pulse;
+      this.beamSheath.scale.x = pulse * 1.2; this.beamSheath.scale.z = pulse * 1.2;
+      this.beam.visible = this.beamSheath.visible = true;
       this.beamGlow.visible = true;
       this.beamGlow.position.copy(to);
-      this.beamGlow.scale.setScalar(0.8 + Math.random() * 0.5);
+      this.beamGlow.scale.setScalar(1 + Math.random() * 0.8);
+      this.guide.visible = this.reticle.visible = false;
     } else {
-      this.beam.visible = false;
-      this.beamGlow.visible = false;
+      this.beam.visible = this.beamSheath.visible = this.beamGlow.visible = false;
+      // guide line: thin normally, hot and thick while charging
+      if (mb.laser.aim && !mb.ragdoll && !mb.dead) {
+        const to = new V3(...mb.laser.aim);
+        placeBeam(this.guide, eyeWorld, to);
+        const gw = 1 + charge * 5;
+        this.guide.scale.x = gw; this.guide.scale.z = gw;
+        this.guide.material.opacity = 0.22 + charge * 0.6;
+        this.guide.material.color.set(mb.laser.aimHit ? '#ff5da2' : '#c95efb');
+        this.guide.visible = true;
+        this.reticle.position.copy(to);
+        this.reticle.quaternion.copy(CAMERA_Q);
+        const rs = (mb.laser.aimHit ? 1.5 : 1) * (1 + charge * 1.2);
+        this.reticle.scale.setScalar(rs);
+        this.reticle.material.color.set(mb.laser.aimHit ? '#ff5da2' : '#c95efb');
+        this.reticle.material.opacity = 0.45 + charge * 0.5;
+        this.reticle.visible = true;
+      } else {
+        this.guide.visible = this.reticle.visible = false;
+      }
     }
 
     // rocket fists
@@ -564,14 +908,18 @@ class MechView {
 // CRABZILLA — a giant, deeply furious crab.
 // ===========================================================================
 class CrabView {
-  constructor(scene) {
+  constructor(scene, style = VIEW_STYLES.crab) {
     this.scene = scene;
+    this.style = style;
+    this.baseScale = style.scale || 1;
     this.root = new THREE.Group();
+    this.root.scale.setScalar(this.baseScale);
     scene.add(this.root);
 
-    const shell = new THREE.MeshLambertMaterial({ color: '#e2543e' });
-    const belly = new THREE.MeshLambertMaterial({ color: '#f2a08a' });
-    const dark = new THREE.MeshLambertMaterial({ color: '#8f2d1e' });
+    const shell = new THREE.MeshLambertMaterial({ color: style.shell });
+    const belly = new THREE.MeshLambertMaterial({ color: style.belly });
+    const dark = new THREE.MeshLambertMaterial({ color: style.dark });
+    this.flashMats = [shell, belly, dark];
 
     const body = new THREE.Mesh(new THREE.BoxGeometry(5.6, 2.6, 4.2), shell);
     body.castShadow = true;
@@ -636,10 +984,30 @@ class CrabView {
       }
     }
 
+    if (style.armored) {
+      // riveted plates for the tank
+      for (const [px, py, pz] of [[0, 1.5, 0], [-1.8, 0.9, -1.2], [1.8, 0.9, -1.2], [0, 0.9, 1.6]]) {
+        const plate = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.6, 2),
+          new THREE.MeshLambertMaterial({ color: '#3d434f' }));
+        plate.position.set(px, py, pz);
+        plate.rotation.y = px * 0.2;
+        this.root.add(plate);
+      }
+    }
+    if (style.crown) {
+      // bosses get a tiny crown. it does nothing. it's perfect.
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 0.8, 8),
+        new THREE.MeshBasicMaterial({ color: '#ffd166' }));
+      crown.position.set(0, 4.2, -1.6);
+      this.root.add(crown);
+    }
+
     this.bar = makeHpBar(scene);
     this.scuttle = Math.random() * 9;
-    this.flash = 0;
+    this.flashT = 0;
   }
+
+  flash() { this.flashT = 0.14; }
 
   dispose(scene) {
     scene.remove(this.root);
@@ -652,22 +1020,30 @@ class CrabView {
     // crabs walk sideways-ish: face 60° off their travel direction (comedy + accuracy)
     this.root.rotation.y = lerpAngle(this.root.rotation.y, (mb.yaw ?? 0) + 0.6, 0.15);
 
+    // white-hot hit flash + squash
+    if (this.flashT > 0) {
+      this.flashT -= dt;
+      const k = Math.max(0, this.flashT / 0.14);
+      for (const m of this.flashMats) m.emissive.setScalar(k * 0.85);
+    }
+
     if (mb.state === 'dead') {
       // flip over, sink
       this.root.rotation.z = damp(this.root.rotation.z, Math.PI, 5, dt);
-      this.root.position.y = y - Math.min(2.2, (mb.t || 0) * 1.2);
+      this.root.position.y = y - Math.min(2.2, (mb.t || 0) * 1.2) * this.baseScale;
       this.bar.sprite.visible = false;
       return;
     }
+    const squash = this.flashT > 0 ? 1.12 : 1;
     if (mb.state === 'spawn') {
       const k = Math.min(1, (mb.t || 0) / 1.4);
-      this.root.scale.setScalar(0.2 + 0.8 * bounce(k));
+      this.root.scale.setScalar((0.2 + 0.8 * bounce(k)) * this.baseScale);
     } else {
-      this.root.scale.setScalar(1);
+      this.root.scale.setScalar(this.baseScale * squash);
     }
 
     // scuttle those little legs
-    this.scuttle += dt * 9;
+    this.scuttle += dt * (this.style.scuttleRate || 9);
     this.legMeshes.forEach((leg, i) => {
       leg.rotation.x = Math.sin(this.scuttle + i * 1.1) * (mb.state === 'walk' ? 0.5 : 0.12);
     });
@@ -688,7 +1064,219 @@ class CrabView {
       e.pupil.position.y = Math.cos(this.scuttle * 1.3) * 0.1;
     }
 
-    this.bar.update(this.root.position, 5.2, mb.hp / mb.maxHp);
+    this.bar.update(this.root.position, 5.2 * this.baseScale, mb.hp / mb.maxHp);
+  }
+}
+
+// ===========================================================================
+// SPITTER — a squat glob-lobbing toad-crab that refuses to fight fair.
+// ===========================================================================
+class SpitterView {
+  constructor(scene) {
+    this.scene = scene;
+    this.root = new THREE.Group();
+    scene.add(this.root);
+    const skin = new THREE.MeshLambertMaterial({ color: '#7aa843' });
+    const belly = new THREE.MeshLambertMaterial({ color: '#c9e07a' });
+    const dark = new THREE.MeshLambertMaterial({ color: '#4a6b28' });
+    this.flashMats = [skin, belly, dark];
+
+    const body = new THREE.Mesh(new THREE.SphereGeometry(2.6, 10, 8), skin);
+    body.scale.set(1.15, 0.8, 1.1);
+    body.castShadow = true;
+    this.root.add(body);
+    this.throat = new THREE.Mesh(new THREE.SphereGeometry(1.5, 10, 8), belly);
+    this.throat.position.set(0, -0.6, -1.6);
+    this.root.add(this.throat);
+    this.snout = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 1.0, 2.2, 8), dark);
+    this.snout.rotation.x = Math.PI / 2.4;
+    this.snout.position.set(0, 0.9, -2.2);
+    this.root.add(this.snout);
+    for (const s of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 8),
+        new THREE.MeshLambertMaterial({ color: '#ffffff' }));
+      eye.position.set(s * 1.2, 1.6, -1.2);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6),
+        new THREE.MeshLambertMaterial({ color: '#1d2033' }));
+      pupil.position.z = -0.34;
+      eye.add(pupil);
+      this.root.add(eye);
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.4, 0.8), dark);
+      leg.position.set(s * 2.2, -1.8, 0.5);
+      this.root.add(leg);
+    }
+    this.bar = makeHpBar(scene);
+    this.flashT = 0;
+    this.wob = Math.random() * 9;
+  }
+  flash() { this.flashT = 0.14; }
+  dispose(scene) { scene.remove(this.root); scene.remove(this.bar.sprite); }
+  apply(ma, mb, alpha, dt) {
+    const y = lerp(ma.p[1], mb.p[1], alpha);
+    this.root.position.set(lerp(ma.p[0], mb.p[0], alpha), y, lerp(ma.p[2], mb.p[2], alpha));
+    this.root.rotation.y = lerpAngle(this.root.rotation.y, mb.yaw ?? 0, 0.15);
+    if (this.flashT > 0) {
+      this.flashT -= dt;
+      for (const m of this.flashMats) m.emissive.setScalar(Math.max(0, this.flashT / 0.14) * 0.85);
+    }
+    if (mb.state === 'dead') {
+      this.root.rotation.z = damp(this.root.rotation.z, Math.PI, 5, dt);
+      this.root.position.y = y - Math.min(2, (mb.t || 0) * 1.2);
+      this.bar.sprite.visible = false;
+      return;
+    }
+    this.wob += dt * 4;
+    // the throat inflates during the spit telegraph. gross. perfect.
+    const tele = mb.state === 'telegraph';
+    const ts = tele ? 1 + Math.min(1, mb.t / 0.9) * 1.1 : 1 + Math.sin(this.wob) * 0.06;
+    this.throat.scale.setScalar(ts);
+    this.snout.rotation.x = damp(this.snout.rotation.x, tele ? Math.PI / 3.2 : Math.PI / 2.4, 8, dt);
+    if (mb.state === 'spawn') this.root.scale.setScalar(0.2 + 0.8 * bounce(Math.min(1, mb.t / 1.2)));
+    else this.root.scale.setScalar(1);
+    this.bar.update(this.root.position, 4.6, mb.hp / mb.maxHp);
+  }
+}
+
+// ===========================================================================
+// FLYER — a lean gull-thing that circles high and dive-bombs.
+// ===========================================================================
+class FlyerView {
+  constructor(scene) {
+    this.scene = scene;
+    this.root = new THREE.Group();
+    scene.add(this.root);
+    const grey = new THREE.MeshLambertMaterial({ color: '#d8d3c8' });
+    const dark = new THREE.MeshLambertMaterial({ color: '#8f8878' });
+    this.flashMats = [grey, dark];
+
+    const body = new THREE.Mesh(new THREE.SphereGeometry(1.7, 10, 8), grey);
+    body.scale.set(0.9, 0.8, 1.6);
+    body.castShadow = true;
+    this.root.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.9, 10, 8), grey);
+    head.position.set(0, 0.5, -2.3);
+    this.root.add(head);
+    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.6, 6),
+      new THREE.MeshLambertMaterial({ color: '#f2a65a' }));
+    beak.rotation.x = -Math.PI / 2;
+    beak.position.set(0, 0.4, -3.6);
+    this.root.add(beak);
+    for (const s of [-1, 1]) {
+      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.14, 0.16),
+        new THREE.MeshLambertMaterial({ color: '#1d2033' }));
+      brow.position.set(s * 0.5, 1.05, -2.6);
+      brow.rotation.z = -s * 0.5;
+      this.root.add(brow);
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6),
+        new THREE.MeshLambertMaterial({ color: '#ffffff' }));
+      eye.position.set(s * 0.5, 0.75, -2.7);
+      this.root.add(eye);
+    }
+    this.wings = [];
+    for (const s of [-1, 1]) {
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(0.32, 1.2, 4.6), dark);
+      wing.geometry.translate(0, 0, 0);
+      const g = new THREE.Group();
+      g.position.set(s * 1.5, 0.4, 0);
+      wing.position.set(s * 1.6, 0, 0.3);
+      wing.rotation.y = s * 0.25;
+      g.add(wing);
+      this.root.add(g);
+      this.wings.push({ g, s });
+    }
+    this.bar = makeHpBar(scene);
+    this.flap = Math.random() * 9;
+    this.flashT = 0;
+    this.vel = new V3();
+    this.prev = new V3();
+  }
+  flash() { this.flashT = 0.14; }
+  dispose(scene) { scene.remove(this.root); scene.remove(this.bar.sprite); }
+  apply(ma, mb, alpha, dt) {
+    const y = lerp(ma.p[1], mb.p[1], alpha);
+    this.root.position.set(lerp(ma.p[0], mb.p[0], alpha), y, lerp(ma.p[2], mb.p[2], alpha));
+    if (dt > 0) {
+      this.vel.copy(this.root.position).sub(this.prev).divideScalar(Math.max(dt, 1e-4));
+      this.prev.copy(this.root.position);
+    }
+    if (this.flashT > 0) {
+      this.flashT -= dt;
+      for (const m of this.flashMats) m.emissive.setScalar(Math.max(0, this.flashT / 0.14) * 0.85);
+    }
+    if (mb.state === 'dead') {
+      this.root.rotation.z += dt * 6; // death spiral
+      this.bar.sprite.visible = false;
+      return;
+    }
+    // face travel direction, pitch into dives
+    const speed = this.vel.length();
+    if (speed > 1) {
+      const yaw = Math.atan2(-this.vel.x, -this.vel.z);
+      this.root.rotation.y = lerpAngle(this.root.rotation.y, yaw, 0.2);
+      this.root.rotation.x = damp(this.root.rotation.x, clampN(this.vel.y / Math.max(4, speed), 0.9) * -1, 6, dt);
+    }
+    const diving = mb.state === 'attack';
+    this.flap += dt * (diving ? 2 : mb.state === 'telegraph' ? 26 : 10);
+    for (const w of this.wings) {
+      w.g.rotation.z = diving ? w.s * 1.25 : Math.sin(this.flap) * 0.7 * w.s + w.s * 0.15;
+    }
+    this.bar.update(this.root.position, 3.4, mb.hp / mb.maxHp);
+  }
+}
+
+// ===========================================================================
+// SWARMLING — a fist-sized gremlin. Alone: adorable. In dozens: a problem.
+// ===========================================================================
+class SwarmView {
+  constructor(scene) {
+    this.scene = scene;
+    this.root = new THREE.Group();
+    scene.add(this.root);
+    const skin = new THREE.MeshLambertMaterial({ color: '#c86bd6' });
+    this.flashMats = [skin];
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.75, 8, 6), skin);
+    body.castShadow = true;
+    this.root.add(body);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6),
+      new THREE.MeshLambertMaterial({ color: '#ffffff' }));
+    eye.position.set(0, 0.25, -0.55);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.15, 6, 6),
+      new THREE.MeshLambertMaterial({ color: '#1d2033' }));
+    pupil.position.z = -0.2;
+    eye.add(pupil);
+    this.root.add(eye);
+    this.legs = [];
+    for (const s of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.2),
+        new THREE.MeshLambertMaterial({ color: '#7a3a85' }));
+      leg.position.set(s * 0.4, -0.75, 0);
+      this.root.add(leg);
+      this.legs.push(leg);
+    }
+    this.run = Math.random() * 9;
+    this.flashT = 0;
+    this.bar = { update() {}, sprite: { visible: false } }; // too small for a bar
+  }
+  flash() { this.flashT = 0.12; }
+  dispose(scene) { scene.remove(this.root); }
+  apply(ma, mb, alpha, dt) {
+    this.root.position.set(lerp(ma.p[0], mb.p[0], alpha), lerp(ma.p[1], mb.p[1], alpha), lerp(ma.p[2], mb.p[2], alpha));
+    this.root.rotation.y = lerpAngle(this.root.rotation.y, mb.yaw ?? 0, 0.3);
+    if (this.flashT > 0) {
+      this.flashT -= dt;
+      for (const m of this.flashMats) m.emissive.setScalar(Math.max(0, this.flashT / 0.12) * 0.9);
+    }
+    if (mb.state === 'dead') {
+      this.root.scale.setScalar(Math.max(0.01, 1 - (mb.t || 0) * 1.4)); // pop!
+      return;
+    }
+    this.run += dt * 22;
+    this.legs[0].rotation.x = Math.sin(this.run) * 0.9;
+    this.legs[1].rotation.x = Math.sin(this.run + Math.PI) * 0.9;
+    if (mb.latched) {
+      // gnawing wiggle
+      this.root.rotation.z = Math.sin(this.run * 0.7) * 0.35;
+    }
   }
 }
 
@@ -704,6 +1292,8 @@ class PigeonView {
     const grey = new THREE.MeshLambertMaterial({ color: '#9aa3b2' });
     const lite = new THREE.MeshLambertMaterial({ color: '#c6ccd6' });
     const green = new THREE.MeshLambertMaterial({ color: '#4d8f6b' });
+    this.flashMats = [grey, lite, green];
+    this.flashT = 0;
 
     const body = new THREE.Mesh(new THREE.SphereGeometry(2.9, 10, 8), grey);
     body.scale.set(1, 0.95, 1.25);
@@ -783,6 +1373,8 @@ class PigeonView {
     this.bob = Math.random() * 9;
   }
 
+  flash() { this.flashT = 0.14; }
+
   dispose(scene) {
     scene.remove(this.root);
     scene.remove(this.bar.sprite);
@@ -792,6 +1384,10 @@ class PigeonView {
     const y = lerp(ma.p[1], mb.p[1], alpha) + 0.6;
     this.root.position.set(lerp(ma.p[0], mb.p[0], alpha), y, lerp(ma.p[2], mb.p[2], alpha));
     this.root.rotation.y = lerpAngle(this.root.rotation.y, mb.yaw ?? 0, 0.15);
+    if (this.flashT > 0) {
+      this.flashT -= dt;
+      for (const m of this.flashMats) m.emissive.setScalar(Math.max(0, this.flashT / 0.14) * 0.85);
+    }
 
     if (mb.state === 'dead') {
       this.root.rotation.z = damp(this.root.rotation.z, Math.PI * 0.9, 5, dt);
@@ -914,7 +1510,14 @@ function placeSegment(mesh, a, b, radiusScale = 1) {
 function placeBeam(mesh, a, b) {
   placeSegment(mesh, a, b, 1);
 }
+const CAMERA_Q = new THREE.Quaternion();
 function lerp(a, b, t) { return a + (b - a) * t; }
+function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+function hashStr(s) {
+  let h = 9;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 387420489);
+  return Math.abs(h ^ (h >>> 9));
+}
 function lerpAngle(a, b, t) {
   let d = b - a;
   while (d > Math.PI) d -= 2 * Math.PI;

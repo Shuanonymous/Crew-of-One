@@ -8,7 +8,10 @@
   <link rel="stylesheet" href="/style.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>" />
   <script type="importmap">
-    { "imports": { "three": "/vendor/three.module.js" } }
+    { "imports": {
+      "three": "/vendor/three.module.js",
+      "three/addons/": "/vendor/three-addons/"
+    } }
   </script>
 </head>
 <body>
@@ -99,7 +102,14 @@
   </div>
 
   <!-- =============================== HUD =============================== -->
+  <div id="vignette"></div>
+  <div id="dmg-layer"></div>
+
   <div id="hud" class="hidden">
+    <div id="boss-bar" class="hidden">
+      <div id="boss-name">GARY</div>
+      <div id="boss-hp"><div id="boss-hp-fill"></div></div>
+    </div>
     <div id="role-banner">
       <div id="role-label">YOU ARE</div>
       <div id="role-name">THE LEGS</div>
