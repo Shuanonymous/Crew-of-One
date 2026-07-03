@@ -1,0 +1,447 @@
+import * as CANNON from 'cannon-es';
+import { MECH } from '../shared/constants.js';
+
+// The mech: one heavy dynamic torso that hovers on stiff invisible legs.
+// HUGE and SLOW on purpose — wind-ups, thundering steps, deliberate turns.
+// Limbs are visual (client) except where they hit things, which resolves
+// here on the server against a list of targets the game mode provides.
+
+const UP = new CANNON.Vec3(0, 1, 0);
+
+export class Mech {
+  constructor(world, id, spawnPos, color, facingYaw = 0) {
+    this.world = world;
+    this.id = id;
+    this.color = color;
+    this.spawn = new CANNON.Vec3(spawnPos.x, spawnPos.y, spawnPos.z);
+
+    const s = MECH.torsoSize;
+    this.body = new CANNON.Body({
+      mass: MECH.torsoMass,
+      shape: new CANNON.Box(new CANNON.Vec3(s.x / 2, s.y / 2, s.z / 2)),
+      position: this.spawn.clone(),
+      linearDamping: 0.25,
+      angularDamping: 0.6,
+    });
+    this.body.allowSleep = false;
+    this.body.quaternion.setFromEuler(0, facingYaw, 0);
+    world.addBody(this.body);
+
+    this.input = {
+      move: { x: 0, z: 0 },
+      legsYaw: facingYaw,   // LEGS player's camera — their WASD frame
+      headYaw: facingYaw,   // HEAD player's aim — body slowly turns to match
+      headPitch: 0,
+      armYawL: facingYaw, armPitchL: 0,
+      armYawR: facingYaw, armPitchR: 0,
+      punchL: false, punchR: false,
+      kick: false,
+      fire: false,
+    };
+
+    this.hp = MECH.maxHp;
+    this.maxHp = MECH.maxHp;
+    this.upgrades = { fists: false, laser: false, rocket: false, armor: false, coffee: false };
+
+    this.grounded = false;
+    this.ragdollT = 0;
+    this.tiltT = 0;
+    this.invulnT = 1.0;   // brief mercy after getting up
+    this.walkSpeed = 0;
+    this.stepAccum = 0;   // distance since last THUD
+    this.stepSide = 0;
+
+    // Attack state machines
+    this.arms = {
+      L: { phase: 'idle', t: 0 },
+      R: { phase: 'idle', t: 0 },
+    };
+    this.kick = { phase: 'idle', t: 0 };
+    this.laser = { charge: 0, firing: false, fireT: 0, from: null, to: null };
+    this.rockets = []; // flying fists: { side, p, v, t }
+
+    this.stats = { damageDealt: 0, punches: 0, kicks: 0, lasers: 0, falls: 0 };
+    this.events = [];
+  }
+
+  get isRagdoll() { return this.ragdollT > 0; }
+  get isDead() { return this.hp <= 0; }
+  get laserLock() { return this.laser.charge > 0.03 || this.laser.firing; }
+
+  // targets: array of { id, body, alive, takeHit(dmg, fromPos, knockback) }
+  update(dt, targets) {
+    const b = this.body;
+    if (this.invulnT > 0) this.invulnT -= dt;
+
+    this.updateRockets(dt, targets);
+
+    if (this.ragdollT > 0) {
+      this.ragdollT -= dt;
+      this.laser.charge = 0; this.laser.firing = false;
+      if (this.ragdollT <= 0) this.getUp();
+      return;
+    }
+    if (this.isDead) return;
+
+    // --- ground probe ---
+    const from = b.position;
+    const to = new CANNON.Vec3(from.x, from.y - MECH.standHeight * 1.35, from.z);
+    const ray = new CANNON.RaycastResult();
+    this.world.raycastClosest(from, to, { skipBackfaces: true }, ray);
+    const hitDist = ray.hasHit && ray.body !== b ? from.y - ray.hitPointWorld.y : Infinity;
+    this.grounded = hitDist < MECH.standHeight * 1.15;
+
+    // --- hover (stiff, heavy suspension) ---
+    if (this.grounded) {
+      const compress = MECH.standHeight - hitDist;
+      let f = compress * MECH.hoverStrength - b.velocity.y * MECH.hoverDamping
+        + b.mass * -this.world.gravity.y;
+      if (f < 0) f = 0;
+      b.applyForce(new CANNON.Vec3(0, f, 0));
+    }
+
+    // --- balance: strong upright torque, sabotaged while kicking ---
+    const balanceMul = this.kick.phase === 'idle' ? 1 : MECH.kick.balanceFactor;
+    const curUp = new CANNON.Vec3(0, 1, 0);
+    b.quaternion.vmult(curUp, curUp);
+    const axis = curUp.cross(UP);
+    const angle = Math.asin(Math.min(1, axis.length()));
+    if (axis.length() > 1e-6) axis.normalize();
+    const torque = axis.scale(angle * MECH.balanceStrength * balanceMul);
+    torque.x -= b.angularVelocity.x * MECH.balanceDamping * balanceMul;
+    torque.z -= b.angularVelocity.z * MECH.balanceDamping * balanceMul;
+    b.torque.vadd(torque, b.torque);
+
+    // --- turn to face where the head looks (slow, weighty) ---
+    const fwd = new CANNON.Vec3(0, 0, -1);
+    b.quaternion.vmult(fwd, fwd);
+    const curYaw = Math.atan2(-fwd.x, -fwd.z);
+    let yawErr = this.input.headYaw - curYaw;
+    while (yawErr > Math.PI) yawErr -= 2 * Math.PI;
+    while (yawErr < -Math.PI) yawErr += 2 * Math.PI;
+    b.torque.y += yawErr * MECH.turnTorque - b.angularVelocity.y * MECH.turnDamping;
+    this.facingYaw = curYaw;
+
+    // --- walking (locked while the laser is charging/firing or kicking) ---
+    const mv = this.input.move;
+    const mlen = Math.hypot(mv.x, mv.z);
+    const canWalk = !this.laserLock && this.kick.phase !== 'windup' && this.kick.phase !== 'swing';
+    if (mlen > 0.01 && this.grounded && canWalk) {
+      const yaw = this.input.legsYaw;
+      const nx = mv.x / Math.max(1, mlen), nz = mv.z / Math.max(1, mlen);
+      const wx = nx * Math.cos(yaw) + nz * Math.sin(yaw);
+      const wz = -nx * Math.sin(yaw) + nz * Math.cos(yaw);
+      const maxSpd = MECH.maxWalkSpeed * (this.upgrades.coffee ? 1.3 : 1);
+      const hSpeed = Math.hypot(b.velocity.x, b.velocity.z);
+      if (hSpeed < maxSpd) {
+        b.applyForce(new CANNON.Vec3(wx * MECH.walkForce, 0, wz * MECH.walkForce), new CANNON.Vec3(0, 0.4, 0));
+      }
+    } else if (this.grounded) {
+      // heavy things PLANT their feet — brake hard when not driving,
+      // otherwise the hovering torso ice-skates around the plaza
+      b.applyForce(new CANNON.Vec3(-b.velocity.x * b.mass * 2.4, 0, -b.velocity.z * b.mass * 2.4));
+    }
+    this.walkSpeed = Math.hypot(b.velocity.x, b.velocity.z);
+
+    // --- thundering footsteps ---
+    if (this.grounded && this.walkSpeed > 0.6) {
+      this.stepAccum += this.walkSpeed * dt;
+      if (this.stepAccum >= MECH.stepLength) {
+        this.stepAccum = 0;
+        this.stepSide = 1 - this.stepSide;
+        this.events.push({ what: 'step', side: this.stepSide });
+      }
+    }
+
+    this.updatePunches(dt, targets);
+    this.updateKick(dt, targets);
+    this.updateLaser(dt, targets);
+
+    // --- falling over ---
+    const uprightness = curUp.dot(UP);
+    if (uprightness < MECH.fallDotThreshold) {
+      this.tiltT += dt;
+      if (this.tiltT > MECH.fallGraceSec) this.startRagdoll();
+    } else {
+      this.tiltT = 0;
+    }
+    if (b.position.y < -20) { this.body.position.copy(this.spawn); this.body.velocity.setZero(); }
+  }
+
+  // ---------------------------------------------------------------- punches
+  updatePunches(dt, targets) {
+    for (const side of ['L', 'R']) {
+      const arm = this.arms[side];
+      const pressed = side === 'L' ? this.input.punchL : this.input.punchR;
+      arm.t += dt;
+      const P = MECH.punch;
+      switch (arm.phase) {
+        case 'idle':
+          if (pressed && !this.laserLock) {
+            arm.phase = 'windup'; arm.t = 0;
+            this.events.push({ what: 'punchWindup', side });
+          }
+          break;
+        case 'windup':
+          if (arm.t >= P.windup) {
+            arm.phase = 'swing'; arm.t = 0;
+            this.stats.punches++;
+            this.resolvePunch(side, targets);
+          }
+          break;
+        case 'swing':
+          if (arm.t >= P.swing) { arm.phase = 'recover'; arm.t = 0; }
+          break;
+        case 'recover':
+          if (arm.t >= P.recover) { arm.phase = 'idle'; arm.t = 0; }
+          break;
+      }
+    }
+  }
+
+  resolvePunch(side, targets) {
+    const P = MECH.punch;
+    const yaw = side === 'L' ? this.input.armYawL : this.input.armYawR;
+    const dmg = this.upgrades.fists ? P.damage * 1.8 : P.damage;
+    const arc = this.upgrades.fists ? P.arc * 1.4 : P.arc;
+    const range = this.upgrades.fists ? P.range * 1.15 : P.range;
+    const hit = this.sweepHit(targets, yaw, range, arc, dmg, P.knockback);
+    if (hit) {
+      this.events.push({ what: 'punchHit', side });
+    } else {
+      this.events.push({ what: 'punchMiss', side });
+      if (this.upgrades.rocket) this.launchRocket(side, yaw);
+    }
+  }
+
+  launchRocket(side, yaw) {
+    const pitch = side === 'L' ? this.input.armPitchL : this.input.armPitchR;
+    const dir = aimDir(yaw, pitch);
+    const start = this.body.position.clone();
+    start.y += 1.5;
+    start.x += dir.x * 4; start.z += dir.z * 4;
+    this.rockets.push({
+      side,
+      p: start,
+      v: dir.scale(34),
+      t: 0,
+    });
+    this.events.push({ what: 'rocketFire', side });
+  }
+
+  updateRockets(dt, targets) {
+    for (const r of this.rockets) {
+      r.t += dt;
+      r.p.vadd(r.v.scale(dt, new CANNON.Vec3()), r.p);
+      for (const tg of targets) {
+        if (!tg.alive || tg.body === this.body) continue;
+        if (tg.body.position.distanceTo(r.p) < 4.2) {
+          tg.takeHit(26, r.p, 1400);
+          this.stats.damageDealt += 26;
+          this.events.push({ what: 'rocketHit' });
+          r.t = 99;
+          break;
+        }
+      }
+    }
+    this.rockets = this.rockets.filter((r) => r.t < 1.6);
+  }
+
+  // ------------------------------------------------------------------- kick
+  updateKick(dt, targets) {
+    const K = MECH.kick;
+    const k = this.kick;
+    k.t += dt;
+    switch (k.phase) {
+      case 'idle':
+        if (this.input.kick && !this.laserLock) {
+          k.phase = 'windup'; k.t = 0;
+          this.events.push({ what: 'kickWindup' });
+        }
+        break;
+      case 'windup':
+        if (k.t >= K.windup) {
+          k.phase = 'swing'; k.t = 0;
+          this.stats.kicks++;
+          const hit = this.sweepHit(targets, this.facingYaw, K.range, K.arc, K.damage, K.knockback);
+          this.events.push({ what: hit ? 'kickHit' : 'kickMiss' });
+          // kicking shoves the kicker backward a little too (physics comedy)
+          const back = aimDir(this.facingYaw, 0).scale(-260);
+          this.body.applyImpulse(new CANNON.Vec3(back.x, 60, back.z));
+        }
+        break;
+      case 'swing':
+        if (k.t >= K.swing) { k.phase = 'recover'; k.t = 0; }
+        break;
+      case 'recover':
+        if (k.t >= K.recover) { k.phase = 'idle'; k.t = 0; }
+        break;
+    }
+  }
+
+  // ------------------------------------------------------------------ laser
+  updateLaser(dt, targets) {
+    const L = MECH.laser;
+    const chargeTime = this.upgrades.laser ? L.chargeTime * 0.55 : L.chargeTime;
+    const lz = this.laser;
+
+    if (lz.firing) {
+      lz.fireT += dt;
+      this.resolveLaser(dt, targets);
+      if (lz.fireT >= L.fireTime) { lz.firing = false; lz.charge = 0; lz.from = lz.to = null; }
+      return;
+    }
+
+    if (this.input.fire) {
+      if (lz.charge === 0) this.events.push({ what: 'laserCharge' });
+      lz.charge = Math.min(1, lz.charge + dt / chargeTime);
+      if (lz.charge >= 1) {
+        lz.firing = true; lz.fireT = 0;
+        this.stats.lasers++;
+        this.events.push({ what: 'laserFire' });
+      }
+    } else if (lz.charge > 0) {
+      lz.charge = 0;
+      this.events.push({ what: 'laserFizzle' });
+    }
+  }
+
+  resolveLaser(dt, targets) {
+    const L = MECH.laser;
+    const dir = aimDir(this.input.headYaw, this.input.headPitch);
+    const from = this.body.position.clone();
+    from.y += MECH.torsoSize.y / 2 + 1.2; // eye height
+    let end = from.clone().vadd(dir.scale(L.range, new CANNON.Vec3()));
+    let hitTarget = null, hitDist = L.range;
+
+    for (const tg of targets) {
+      if (!tg.alive || tg.body === this.body) continue;
+      // distance from target center to the beam line
+      const toT = tg.body.position.vsub(from);
+      const along = toT.dot(dir);
+      if (along < 0 || along > L.range) continue;
+      const closest = from.clone().vadd(dir.scale(along, new CANNON.Vec3()));
+      const off = closest.distanceTo(tg.body.position);
+      const r = tg.radius || 3;
+      if (off < L.beamRadius + r && along < hitDist) {
+        hitDist = along;
+        hitTarget = tg;
+      }
+    }
+    if (hitTarget) {
+      end = from.clone().vadd(dir.scale(hitDist, new CANNON.Vec3()));
+      const dmg = L.dps * dt;
+      hitTarget.takeHit(dmg, from, 60);
+      this.stats.damageDealt += dmg;
+    }
+    this.laser.from = [rnd(from.x), rnd(from.y), rnd(from.z)];
+    this.laser.to = [rnd(end.x), rnd(end.y), rnd(end.z)];
+    this.laser.hitting = !!hitTarget;
+  }
+
+  // Shared melee wedge check. Returns true if anything got hit.
+  sweepHit(targets, yaw, range, arc, dmg, knockback) {
+    let hit = false;
+    const origin = this.body.position;
+    for (const tg of targets) {
+      if (!tg.alive || tg.body === this.body) continue;
+      const d = tg.body.position.vsub(origin);
+      const dist = Math.hypot(d.x, d.z);
+      if (dist > range + (tg.radius || 0)) continue;
+      const dirYaw = Math.atan2(-d.x, -d.z);
+      let diff = dirYaw - yaw;
+      while (diff > Math.PI) diff -= 2 * Math.PI;
+      while (diff < -Math.PI) diff += 2 * Math.PI;
+      if (Math.abs(diff) > arc / 2) continue;
+      tg.takeHit(dmg, origin, knockback);
+      this.stats.damageDealt += dmg;
+      hit = true;
+    }
+    return hit;
+  }
+
+  // ----------------------------------------------------------------- damage
+  takeHit(dmg, fromPos, knockback = 0) {
+    if (this.isDead || this.invulnT > 0) return;
+    const scaled = this.upgrades.armor ? dmg * 0.7 : dmg;
+    this.hp = Math.max(0, this.hp - scaled);
+    this.events.push({ what: 'hurt', dmg: Math.round(scaled) });
+    if (knockback && fromPos) {
+      const dir = this.body.position.vsub(fromPos);
+      dir.y = 0;
+      if (dir.length() > 0.01) dir.normalize();
+      dir.y = 0.35;
+      this.body.applyImpulse(dir.scale(knockback));
+    }
+    if (this.hp <= 0) this.events.push({ what: 'die' });
+  }
+
+  startRagdoll() {
+    if (this.isRagdoll) return;
+    this.ragdollT = MECH.ragdollSec;
+    this.tiltT = 0;
+    this.stats.falls++;
+    this.laser.charge = 0; this.laser.firing = false;
+    this.body.angularDamping = 0.15;
+    this.events.push({ what: 'fell' });
+  }
+
+  getUp() {
+    const b = this.body;
+    b.position.y = MECH.standHeight + 0.5;
+    b.velocity.setZero();
+    b.angularVelocity.setZero();
+    b.quaternion.setFromEuler(0, this.input.headYaw, 0);
+    b.angularDamping = 0.6;
+    this.ragdollT = 0;
+    this.invulnT = 1.2;
+    this.events.push({ what: 'getUp' });
+  }
+
+  heal(amount) {
+    this.hp = Math.min(this.maxHp, this.hp + amount);
+  }
+
+  snapshot() {
+    const b = this.body;
+    const snap = {
+      id: this.id,
+      color: this.color,
+      p: [rnd(b.position.x), rnd(b.position.y), rnd(b.position.z)],
+      q: [rnd(b.quaternion.x), rnd(b.quaternion.y), rnd(b.quaternion.z), rnd(b.quaternion.w)],
+      hp: Math.round(this.hp),
+      maxHp: this.maxHp,
+      walk: rnd(this.walkSpeed),
+      grounded: this.grounded,
+      ragdoll: this.isRagdoll,
+      dead: this.isDead,
+      head: { yaw: rnd(this.input.headYaw), pitch: rnd(this.input.headPitch) },
+      arms: {
+        L: { yaw: rnd(this.input.armYawL), pitch: rnd(this.input.armPitchL), phase: this.arms.L.phase, t: rnd(this.arms.L.t) },
+        R: { yaw: rnd(this.input.armYawR), pitch: rnd(this.input.armPitchR), phase: this.arms.R.phase, t: rnd(this.arms.R.t) },
+      },
+      kick: { phase: this.kick.phase, t: rnd(this.kick.t) },
+      laser: {
+        charge: rnd(this.laser.charge),
+        firing: this.laser.firing,
+        from: this.laser.firing ? this.laser.from : null,
+        to: this.laser.firing ? this.laser.to : null,
+        hitting: !!this.laser.hitting,
+      },
+      rockets: this.rockets.map((r) => ({ side: r.side, p: [rnd(r.p.x), rnd(r.p.y), rnd(r.p.z)] })),
+      up: this.upgrades,
+      ev: this.events,
+    };
+    this.events = [];
+    return snap;
+  }
+}
+
+function aimDir(yaw, pitch) {
+  return new CANNON.Vec3(
+    -Math.sin(yaw) * Math.cos(pitch),
+    Math.sin(pitch),
+    -Math.cos(yaw) * Math.cos(pitch)
+  );
+}
+function rnd(n) { return Math.round(n * 1000) / 1000; }

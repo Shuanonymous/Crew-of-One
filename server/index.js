@@ -3,8 +3,7 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
-import { Game } from './game.js';
-import { PHYSICS_HZ, SNAPSHOT_HZ, MSG, ROLE } from '../shared/constants.js';
+import { RoomManager } from './rooms.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
@@ -14,55 +13,33 @@ app.use(express.static(path.join(root, 'public')));
 app.use('/shared', express.static(path.join(root, 'shared')));
 // Serve three.js straight out of node_modules — no build step needed.
 app.use('/vendor/three.module.js', express.static(path.join(root, 'node_modules/three/build/three.module.js')));
+app.get('/healthz', (_req, res) => res.send('ok'));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
-
-// Phase 1: a single shared game. (Phase 2 turns this into rooms.)
-const game = new Game();
-let nextPlayerId = 1;
-const sockets = new Map(); // playerId -> ws
+const manager = new RoomManager();
 
 wss.on('connection', (ws) => {
-  const playerId = 'p' + nextPlayerId++;
-  sockets.set(playerId, ws);
-  game.addPlayer(playerId, 'Pilot ' + playerId);
-
-  ws.send(JSON.stringify({
-    t: MSG.WELCOME,
-    playerId,
-    role: ROLE.ALL,
-    world: game.worldInfo(),
-  }));
-  console.log(`[+] ${playerId} connected (${sockets.size} online)`);
-
+  const id = manager.connect(ws);
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
   ws.on('message', (buf) => {
     let msg;
     try { msg = JSON.parse(buf); } catch { return; }
-    if (msg.t === MSG.INPUT && msg.data) {
-      game.applyInput(playerId, msg.data);
-    }
+    try { manager.handle(id, msg); } catch (e) { console.error('handle error:', e); }
   });
-
-  ws.on('close', () => {
-    sockets.delete(playerId);
-    game.removePlayer(playerId);
-    console.log(`[-] ${playerId} disconnected (${sockets.size} online)`);
-  });
+  ws.on('close', () => manager.disconnect(id));
   ws.on('error', () => {});
 });
 
-// Physics loop: fixed timestep
-setInterval(() => game.step(), 1000 / PHYSICS_HZ);
-
-// Broadcast loop: send the world state to everyone
+// Cull dead connections so crews don't wait on ghosts
 setInterval(() => {
-  if (sockets.size === 0) return;
-  const data = JSON.stringify({ t: MSG.STATE, ...game.snapshot() });
-  for (const ws of sockets.values()) {
-    if (ws.readyState === ws.OPEN) ws.send(data);
+  for (const ws of wss.clients) {
+    if (!ws.isAlive) { ws.terminate(); continue; }
+    ws.isAlive = false;
+    ws.ping();
   }
-}, 1000 / SNAPSHOT_HZ);
+}, 15000);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
