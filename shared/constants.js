@@ -125,51 +125,46 @@ export const MONSTERS = {
   },
 };
 
+// Serious kaiju designations. The humor lives in the crew, not the monsters.
 export const BOSS_NAMES = [
-  'BARONESS PINCHELOT THE UNREASONABLE',
-  'GARY, DEVOURER OF BUS STOPS',
-  'THE HONORABLE JUDGE CLAWSTICE',
-  'KEVIN THE ABSOLUTE UNIT',
-  'DUKE SLAMWICH THE THIRD',
-  'PRINCESS STOMPATHY',
+  'VORAX, THE TIDE THAT WALKS',
+  'KHARYBDIS PRIME',
+  'THE SILENT COLOSSUS',
+  'MERIDIAN WRAITH',
+  'CATEGORY-6: NIGHTFALL',
+  'THE HOLLOW KING',
 ];
 
-// Wave recipes: composition forces a different plan each round.
-export const WAVES = [
-  { crab: 2 },                                   // 1 — hello
-  { rusher: 4 },                                 // 2 — punish slow crews
-  { crab: 2, spitter: 1 },                       // 3 — someone must close distance
-  { rusher: 3, flyer: 1 },                       // 4 — eyes up
-  { boss: 1, rusher: 2 },                        // 5 — BOSS
-  { swarmling: 10, crab: 1 },                    // 6 — SHAKE THEM OFF
-  { spitter: 2, tank: 1 },                       // 7 — laser the tin can
-  { flyer: 2, rusher: 4, pigeon: 1 },            // 8
-  { tank: 1, swarmling: 10, spitter: 1 },        // 9 — chaos
-  { boss: 1, flyer: 1, rusher: 3 },              // 10 — BOSS
-];
-export function waveRecipe(n) {
-  if (n <= WAVES.length) return WAVES[n - 1];
-  if (n % 5 === 0) return { boss: 1, rusher: 2 + Math.floor(n / 5), flyer: 1 };
-  const k = n - WAVES.length;
-  return {
-    crab: 1 + (n % 3), rusher: 2 + (n % 4), spitter: 1 + (k % 2),
-    tank: n % 3 === 0 ? 1 : 0, flyer: 1 + (n % 2), swarmling: n % 2 === 0 ? 8 : 0,
-    pigeon: n % 3 === 1 ? 1 : 0,
-  };
-}
+// ---------------------------------------------------------------------------
+// ENDLESS RUN — the danger clock scales everything with time survived.
+// ---------------------------------------------------------------------------
+export const DANGER = {
+  rampSec: 60,             // +1 danger level per minute
+  hpScale: 0.22,           // monster hp × (1 + level·this)
+  dmgScale: 0.13,
+  spawnBase: 4.5,          // spawn credit points per second at level 0
+  spawnScale: 0.5,         // + this per level
+  bossAtLevels: [3, 6, 9, 12, 16, 20],
+  maxMonsters: 26,         // hard cap (performance + readability)
+  maxSwarm: 12,            // swarmlings within the cap
+  // spawn costs (spawner spends accumulated points)
+  costs: { rusher: 6, crab: 12, swarmling: 4, spitter: 18, flyer: 20, pigeon: 26, tank: 45 },
+  // danger level at which each type unlocks
+  unlocks: { rusher: 0, crab: 0, swarmling: 1, spitter: 1, flyer: 2, pigeon: 3, tank: 4 },
+};
 
-// ---------------------------------------------------------------------------
-// The between-waves shop.
-// ---------------------------------------------------------------------------
+// Endless shop: repeatable tiers (price grows 1.35× per buy) + rare specials.
 export const SHOP = [
-  { id: 'repair', name: 'DUCT TAPE & WELDING', desc: '+45 mech HP', price: 30, repeat: true },
-  { id: 'fists', name: 'COMICALLY LARGE FISTS', desc: 'Punches hit way harder and wider', price: 60 },
-  { id: 'laser', name: 'ESPRESSO LASER', desc: 'Eye laser charges twice as fast', price: 60 },
-  { id: 'rocket', name: 'ROCKET PUNCH', desc: 'Punches launch the fist as a missile', price: 90 },
-  { id: 'armor', name: 'LEG ARMOR (TRASH CAN LIDS)', desc: 'Take 30% less damage', price: 50 },
-  { id: 'coffee', name: 'LEG DAY PROTOCOL', desc: 'Walk 30% faster', price: 45 },
+  { id: 'repair', name: 'FIELD REPAIR', desc: '+50 hull', price: 25, repeat: true, priceGrowth: 1.2 },
+  { id: 'dmg', name: 'FIST SERVOS', desc: '+20% melee damage', price: 45, repeat: true, priceGrowth: 1.35 },
+  { id: 'armor', name: 'COMPOSITE PLATING', desc: '+10% damage reduction (stacks to 60%)', price: 45, repeat: true, priceGrowth: 1.35 },
+  { id: 'speed', name: 'ACTUATOR OVERDRIVE', desc: '+12% move speed', price: 40, repeat: true, priceGrowth: 1.35 },
+  { id: 'laser', name: 'CAPACITOR BANKS', desc: '+25% laser damage, -10% charge time', price: 50, repeat: true, priceGrowth: 1.35 },
+  { id: 'rocket', name: 'ROCKET FIST', desc: 'RARE: whiffed punches launch the fist', price: 120 },
+  { id: 'turret', name: 'SHOULDER TURRET', desc: 'RARE: auto-cannon tracks nearby hostiles', price: 140 },
+  { id: 'dash', name: 'DASH THRUSTERS', desc: 'RARE: LEGS double-tap = thruster dash', price: 130 },
 ];
-export const SHOP_TIME = 25;
+export const BEACON_RADIUS = 9;   // stand this close to a supply beacon to shop
 
 // ---------------------------------------------------------------------------
 // Rooms, roles, modes, protocol

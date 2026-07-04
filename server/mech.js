@@ -36,12 +36,16 @@ export class Mech {
       armYawR: facingYaw, armPitchR: 0,
       punchL: false, punchR: false,
       kick: false,
+      dash: false,
       fire: false,
     };
 
     this.hp = MECH.maxHp;
     this.maxHp = MECH.maxHp;
-    this.upgrades = { fists: false, laser: false, rocket: false, armor: false, coffee: false };
+    this.upgrades = { dmg: 0, armor: 0, speed: 0, laser: 0, rocket: false, turret: false, dash: false };
+    this.dashCd = 0;
+    this.turretCd = 0;
+    this.prevDash = false;
 
     this.grounded = false;
     this.ragdollT = 0;
@@ -60,7 +64,7 @@ export class Mech {
     this.laser = { charge: 0, firing: false, fireT: 0, from: null, to: null };
     this.rockets = []; // flying fists: { side, p, v, t }
 
-    this.stats = { damageDealt: 0, punches: 0, kicks: 0, lasers: 0, falls: 0 };
+    this.stats = { damageDealt: 0, punches: 0, kicks: 0, lasers: 0, falls: 0, byPart: { ARMS: 0, LEGS: 0, HEAD: 0, TURRET: 0 } };
     this.events = [];
   }
 
@@ -125,13 +129,14 @@ export class Mech {
     // --- walking (locked while the laser is charging/firing or kicking) ---
     const mv = this.input.move;
     const mlen = Math.hypot(mv.x, mv.z);
-    const canWalk = !this.laserLock && this.kick.phase !== 'windup' && this.kick.phase !== 'swing';
+    const canWalk = this.kick.phase !== 'windup' && this.kick.phase !== 'swing';
     if (mlen > 0.01 && this.grounded && canWalk) {
       const yaw = this.input.legsYaw;
       const nx = mv.x / Math.max(1, mlen), nz = mv.z / Math.max(1, mlen);
       const wx = nx * Math.cos(yaw) + nz * Math.sin(yaw);
       const wz = -nx * Math.sin(yaw) + nz * Math.cos(yaw);
-      const maxSpd = MECH.maxWalkSpeed * (this.upgrades.coffee ? 1.3 : 1);
+      let maxSpd = MECH.maxWalkSpeed * (1 + 0.12 * this.upgrades.speed);
+      if (this.laserLock) maxSpd *= 0.3; // firing on the move, slowly — cinematic
       const hSpeed = Math.hypot(b.velocity.x, b.velocity.z);
       if (hSpeed < maxSpd) {
         b.applyForce(new CANNON.Vec3(wx * MECH.walkForce, 0, wz * MECH.walkForce), new CANNON.Vec3(0, 0.4, 0));
@@ -151,6 +156,44 @@ export class Mech {
         this.stepAccum = 0;
         this.stepSide = 1 - this.stepSide;
         this.events.push({ what: 'step', side: this.stepSide });
+      }
+    }
+
+    // DASH THRUSTERS (rare find): a violent sideways lunge
+    if (this.dashCd > 0) this.dashCd -= dt;
+    const dashPressed = this.input.dash && !this.prevDash;
+    this.prevDash = this.input.dash;
+    if (dashPressed && this.upgrades.dash && this.dashCd <= 0 && this.grounded) {
+      const yawD = this.input.legsYaw;
+      const dx = mlen > 0.01 ? (mv.x / mlen) : 0, dz = mlen > 0.01 ? (mv.z / mlen) : -1;
+      const wx = dx * Math.cos(yawD) + dz * Math.sin(yawD);
+      const wz = -dx * Math.sin(yawD) + dz * Math.cos(yawD);
+      b.applyImpulse(new CANNON.Vec3(wx * 1500, 90, wz * 1500));
+      this.dashCd = 3;
+      this.events.push({ what: 'dash' });
+    }
+
+    // SHOULDER TURRET (rare find): tracks and pesters the nearest hostile
+    if (this.upgrades.turret) {
+      this.turretCd -= dt;
+      if (this.turretCd <= 0) {
+        let best = null, bd = 38;
+        for (const tg of targets) {
+          if (!tg.alive || tg.body === b || tg.id === 'car') continue;
+          const d = tg.body.position.distanceTo(b.position);
+          if (d < bd) { bd = d; best = tg; }
+        }
+        if (best) {
+          this.turretCd = 1.1;
+          const dealt = best.takeHit(9, b.position, 120, 'turret');
+          this.stats.damageDealt += dealt ?? 9;
+          this.stats.byPart.TURRET = (this.stats.byPart.TURRET || 0) + (dealt ?? 9);
+          const p = best.body.position;
+          this.events.push({ what: 'turretFire', to: [rnd(p.x), rnd(p.y), rnd(p.z)] });
+          this.events.push({ what: 'dmgNum', p: [rnd(p.x), rnd(p.y + 3), rnd(p.z)], dmg: Math.round(dealt ?? 9) });
+        } else {
+          this.turretCd = 0.3;
+        }
       }
     }
 
@@ -203,10 +246,8 @@ export class Mech {
   resolvePunch(side, targets) {
     const P = MECH.punch;
     const yaw = side === 'L' ? this.input.armYawL : this.input.armYawR;
-    const dmg = this.upgrades.fists ? P.damage * 1.8 : P.damage;
-    const arc = this.upgrades.fists ? P.arc * 1.4 : P.arc;
-    const range = this.upgrades.fists ? P.range * 1.15 : P.range;
-    const hit = this.sweepHit(targets, yaw, range, arc, dmg, P.knockback);
+    const dmg = P.damage * (1 + 0.2 * this.upgrades.dmg);
+    const hit = this.sweepHit(targets, yaw, P.range, P.arc, dmg, P.knockback, 'ARMS');
     if (hit) {
       this.events.push({ what: 'punchHit', side });
     } else {
@@ -237,8 +278,9 @@ export class Mech {
       for (const tg of targets) {
         if (!tg.alive || tg.body === this.body) continue;
         if (tg.body.position.distanceTo(r.p) < 4.2) {
-          const dealt = tg.takeHit(26, r.p, 1400);
+          const dealt = tg.takeHit(26, r.p, 1400, 'rocket');
           this.stats.damageDealt += dealt ?? 26;
+          this.stats.byPart.ARMS = (this.stats.byPart.ARMS || 0) + (dealt ?? 26);
           this.events.push({ what: 'rocketHit', p: [rnd(r.p.x), rnd(r.p.y), rnd(r.p.z)] });
           this.events.push({ what: 'dmgNum', p: [rnd(r.p.x), rnd(r.p.y + 2), rnd(r.p.z)], dmg: Math.round(dealt ?? 26) });
           r.t = 99;
@@ -266,7 +308,7 @@ export class Mech {
           k.phase = 'swing'; k.t = 0;
           this.stats.kicks++;
           this.kickSwung = true; // game modes use this to shake off swarmlings
-          const hit = this.sweepHit(targets, this.facingYaw, K.range, K.arc, K.damage, K.knockback);
+          const hit = this.sweepHit(targets, this.facingYaw, K.range, K.arc, K.damage * (1 + 0.2 * this.upgrades.dmg), K.knockback, 'LEGS');
           this.events.push({ what: hit ? 'kickHit' : 'kickMiss' });
           // kicking shoves the kicker backward a little too (physics comedy)
           const back = aimDir(this.facingYaw, 0).scale(-260);
@@ -285,7 +327,7 @@ export class Mech {
   // ------------------------------------------------------------------ laser
   updateLaser(dt, targets) {
     const L = MECH.laser;
-    const chargeTime = this.upgrades.laser ? L.chargeTime * 0.55 : L.chargeTime;
+    const chargeTime = L.chargeTime * Math.pow(0.9, this.upgrades.laser);
     const lz = this.laser;
 
     // aim guide: the whole crew always sees where the eye is pointing
@@ -295,10 +337,11 @@ export class Mech {
 
     if (lz.firing) {
       lz.fireT += dt;
-      const dmg = L.dps * dt;
+      const dmg = L.dps * (1 + 0.25 * this.upgrades.laser) * dt;
       if (cast.target) {
-        const dealt = cast.target.takeHit(dmg, cast.from, 60);
+        const dealt = cast.target.takeHit(dmg, cast.from, 60, 'laser');
         this.stats.damageDealt += dealt ?? dmg;
+        this.stats.byPart.HEAD = (this.stats.byPart.HEAD || 0) + (dealt ?? dmg);
         this.laserDmgAcc = (this.laserDmgAcc || 0) + (dealt ?? dmg);
         if (this.laserDmgAcc >= 20) {
           const p = cast.target.body.position;
@@ -361,7 +404,7 @@ export class Mech {
   }
 
   // Shared melee wedge check. Returns true if anything got hit.
-  sweepHit(targets, yaw, range, arc, dmg, knockback) {
+  sweepHit(targets, yaw, range, arc, dmg, knockback, part = 'ARMS') {
     let hit = false;
     const origin = this.body.position;
     for (const tg of targets) {
@@ -378,6 +421,7 @@ export class Mech {
       const p = tg.body.position;
       this.events.push({ what: 'dmgNum', p: [rnd(p.x), rnd(p.y + (tg.radius || 2) + 1), rnd(p.z)], dmg: Math.round(dealt ?? dmg) });
       this.stats.damageDealt += dealt ?? dmg;
+      this.stats.byPart[part] = (this.stats.byPart[part] || 0) + (dealt ?? dmg);
       hit = true;
     }
     return hit;
@@ -386,7 +430,7 @@ export class Mech {
   // ----------------------------------------------------------------- damage
   takeHit(dmg, fromPos, knockback = 0) {
     if (this.isDead || this.invulnT > 0) return;
-    const scaled = this.upgrades.armor ? dmg * 0.7 : dmg;
+    const scaled = dmg * (1 - Math.min(0.6, 0.1 * this.upgrades.armor));
     this.hp = Math.max(0, this.hp - scaled);
     this.events.push({ what: 'hurt', dmg: Math.round(scaled) });
     if (knockback && fromPos) {

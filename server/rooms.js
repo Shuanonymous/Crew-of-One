@@ -2,6 +2,7 @@ import { BrawlGame } from './brawl.js';
 import { DuelGame } from './duel.js';
 import { TrainingGame } from './training.js';
 import { PHYSICS_HZ, SNAPSHOT_HZ, MSG, MODES, ROLE, splitRoles } from '../shared/constants.js';
+import { stats } from './stats.js';
 
 // Rooms: 4-letter codes, a host, a lobby, and one running game.
 // No accounts — a player IS their websocket.
@@ -40,6 +41,7 @@ export class RoomManager {
         p.name = cleanName(msg.name);
         const newRoom = new Room(this.makeCode(), this);
         this.rooms.set(newRoom.code, newRoom);
+        stats.roomsCreated++;
         newRoom.addPlayer(p);
         break;
       }
@@ -74,6 +76,16 @@ export class RoomManager {
       case MSG.AGAIN:
         room?.again(id);
         break;
+      case 'ping': {
+        // crew pings: relay to the whole room with the sender's name
+        if (room && msg.p && Array.isArray(msg.p)) {
+          const sender = room.players.get(id);
+          for (const q of room.players.values()) {
+            send(q.ws, { t: 'ping', p: msg.p.slice(0, 3), kind: String(msg.kind || 'go').slice(0, 12), name: sender?.name || '?' });
+          }
+        }
+        break;
+      }
       case MSG.TO_LOBBY:
         room?.toLobby(id);
         break;
@@ -105,6 +117,8 @@ export class Room {
     this.loop = null;
     this.snapLoop = null;
     this.roleRotation = 0;    // bump every round so roles shuffle
+    this.bestTime = 0;        // best endless survival (seconds) this room has seen
+    this.endCounted = false;
   }
 
   get playing() { return !!this.game; }
@@ -195,7 +209,10 @@ export class Room {
     this.game =
       this.mode === MODES.DUEL ? new DuelGame() :
       this.mode === MODES.TRAINING ? new TrainingGame() :
-      new BrawlGame();
+      new BrawlGame(this.bestTime);
+    this.endCounted = false;
+    if (this.mode === MODES.DUEL) stats.duelsPlayed++;
+    if (this.mode === MODES.TRAINING) stats.trainingsPlayed++;
 
     for (const p of this.players.values()) {
       send(p.ws, {
@@ -254,6 +271,13 @@ export class Room {
     this.loop = setInterval(() => this.game?.step(), 1000 / PHYSICS_HZ);
     this.snapLoop = setInterval(() => {
       if (!this.game) return;
+      if (this.game.phase === 'dead' && !this.endCounted) {
+        this.endCounted = true;
+        stats.runsCompleted++;
+        const t = this.game.summary?.time || 0;
+        if (t > this.bestTime) this.bestTime = t;
+        if (t > stats.bestSurvivalSec) stats.bestSurvivalSec = t;
+      }
       const data = JSON.stringify({ t: MSG.STATE, ...this.game.snapshot() });
       for (const p of this.players.values()) {
         if (p.ws.readyState === p.ws.OPEN) p.ws.send(data);

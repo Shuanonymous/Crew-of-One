@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
 import { RoomManager } from './rooms.js';
+import { stats as statsObj } from './stats.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
@@ -15,6 +16,12 @@ app.use('/shared', express.static(path.join(root, 'shared')));
 app.use('/vendor/three.module.js', express.static(path.join(root, 'node_modules/three/build/three.module.js')));
 app.use('/vendor/three-addons', express.static(path.join(root, 'node_modules/three/examples/jsm')));
 app.get('/healthz', (_req, res) => res.send('ok'));
+// privacy-respecting play counters (no per-user data at all)
+app.get('/admin', (req, res) => {
+  const pass = process.env.ADMIN_PASS || 'crewboss';
+  if (req.query.pass !== pass) return res.status(403).send('nope');
+  res.json({ ...statsObj, roomsOpenNow: manager.rooms.size, playersOnline: manager.players.size });
+});
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
