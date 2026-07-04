@@ -1,5 +1,77 @@
 # Crew of One — Progress
 
+# Codex repair rework — four-mode structure, safe shop, settings pause
+
+## What changed
+- Added **Classic Wave Mode** as the default beginner-friendly mode. Crews fight a finite wave, clear it, earn a wave bonus, shop safely, then the host readies the next wave.
+- Preserved **Endless Escalation** as the existing danger-clock survival format with supply-beacon buying.
+- Preserved **Mech Duel** and **Training Course** as launchable modes.
+- Added a room-safe settings pause path: solo runs and Training pause the authoritative game while settings are open; multiplayer settings are personal so one player cannot freeze everyone unfairly.
+- Made shop UI copy mode-aware so Classic reads as a safe upgrade bay and Endless reads as a field supply beacon.
+- Added automated tests for Classic shop reliability: wave clear opens shop, repair spends credits and heals, upgrade tiers apply, ready starts the next wave, and combat buying is rejected.
+
+## Files changed
+- `server/classic.js` — new Classic Wave game mode built on the existing brawl systems.
+- `server/rooms.js` — default mode changed to Classic, mode launch split between Classic/Endless/Duel/Training, solo/training pause handling added.
+- `shared/constants.js` — added `classic` mode and pause protocol message.
+- `public/index.html` — lobby now exposes four playable formats and settings/shop copy is clearer.
+- `public/js/main.js` — client mode handling, shop copy, Classic end summary, and settings pause/resume behavior.
+- `test/server-logic.test.js` — Classic shop/upgrade regression tests.
+- `test/rooms.test.js` — room launch tests for default Classic and separate Endless.
+- `README.md`, `PLAYTEST.md`, `AGENTS.md` — player/developer guidance updated.
+
+## How modes now work
+- **Classic Wave Mode:** default lobby mode. The server spawns a recipe for the current wave. When all monsters are defeated, the server awards bonus credits and enters a safe shop phase. The host clicks ready to start the next wave.
+- **Endless Escalation:** existing survival mode. Danger rises continuously, monsters spawn from a budget, bosses appear at danger milestones, and supply beacons open the field shop.
+- **Mech Duel:** two crews receive separate mechs and fight until one mech is destroyed.
+- **Training Course:** solo-friendly objective course for movement, punching, kicking, and laser practice.
+
+## How buying works
+- Classic buying is only accepted during the between-wave shop phase. Unaffordable buttons are disabled in the client. Purchases spend shared credits and immediately update mech upgrades/repair.
+- Endless buying remains supply-beacon gated. If the mech is not near a beacon, the server rejects the purchase.
+- Regression coverage now checks that Classic repair and upgrades actually apply and that combat purchases are rejected.
+
+## How settings work
+- Settings persist in `localStorage` for master volume, music volume, screen shake, and graphics quality.
+- Opening settings during solo play or Training asks the server to pause that room’s game loop until settings close.
+- Opening settings during multiplayer does not pause the whole room, preventing one player from freezing everyone; the UI explains this clearly.
+- The settings panel has a clear **RESUME / BACK** button.
+
+## Tuning values
+- Classic shop break: 30 seconds if the host does not ready early.
+- Classic wave bonus: 25 credits base + 15 credits per cleared wave.
+- Classic early recipes introduce rushers/crabs first, then spitters/flyers, then tank/boss pressure.
+- Existing performance caps remain: Endless monster cap 26 and swarm cap 12.
+- Camera shake budget remains capped in the renderer: each hit max 0.9 trauma, total max 1.2, multiplied by the user’s shake setting.
+
+
+## QA follow-up fixes before merge
+- Removed visible placeholder Ko-fi/Discord links from the title and end screens.
+- Removed the old direct comparison to a specific film franchise from project docs and kept the direction as original cinematic mech/kaiju action.
+- Changed bird-monster face details from comedy eyes to red sensor slits and armored brow plates.
+- Made the credits HUD visible in Classic as well as Endless so upgrade economy is clearer before the shop opens.
+- Added WebSocket pause regression coverage for solo Classic settings pause/resume snapshots.
+
+## Known limitations
+- Multiplayer settings are personal and do not pause the whole fight. This is intentional for fairness, but the safest experience is to adjust settings before starting a multiplayer wave.
+- Classic mode reuses the existing city, mech, enemy, shop, effects, and combat systems; it is a stability-first rework rather than a total art rewrite.
+- Browser E2E was limited to server smoke testing in this environment; use the updated `PLAYTEST.md` checklist for a real 10-minute player pass.
+
+## Render deployment
+- Render remains a single Node web service using `render.yaml`.
+- Build command remains `npm ci`; start command remains `node server/index.js`; health check remains `/healthz`.
+- If Render is connected to GitHub, merging the PR into the linked branch should auto-deploy. If it does not, use Render’s **Manual Deploy → Deploy latest commit** button.
+
+## Tests passed
+- `npm test` passes after the rework, including server logic and real WebSocket room tests.
+- Smoke start was run with `npm start` and `/healthz` checked via `curl`.
+
+## Could not be fully verified here
+- Full visual/browser playtest with real humans, real audio comfort, and multiple physical machines. Use `PLAYTEST.md` for that pass before a public game night.
+
+---
+
+
 **Status: COMPLETE and DEPLOYED — live at https://crew-of-one.onrender.com**
 
 ---
@@ -8,7 +80,7 @@
 
 ## 1. Tone
 Night-rain district, sweeping searchlights, horizon lightning flashes, red
-predator eye-slits on every monster (googly eyes gone), serious boss names
+predator eye-slits on every monster, serious boss names
 (VORAX THE TIDE THAT WALKS, KHARYBDIS PRIME, THE SILENT COLOSSUS…). Humor
 lives only in UI copy and crew chaos.
 
@@ -68,8 +140,7 @@ stations (5 hp/s inside 10 m; monsters within 9 m deal 6 dps to them),
 pings (Q target / X danger, 6 s markers with distance), disconnect
 role-merge retested in endless, /admin?pass=… play counters (in-memory —
 resets on redeploy; swap to a disk/DB store if metrics matter later),
-Ko-fi + Discord placeholder links on title & summary (search
-YOUR_PAGE_HERE / YOUR_INVITE_HERE in public/index.html to fill in).
+Visible placeholder support/community links were removed from production UI until real links exist.
 
 ## Steam/Electron porting notes
 Core game logic is all server-side Node (no browser APIs). Client uses
@@ -142,7 +213,7 @@ boss every 5th.
   per building), puntable car props (server-simulated, mass 2.5,
   punt impulse = knockback × 0.055).
 - Mech de-goofed: bobble antenna → blade antenna with blinking warning
-  light; googly eyes stay on the monsters only.
+  light; monsters now use red predator eye-slits rather than comedy eyes.
 
 ## 5. Music & sound
 - `music.js`: procedural step-sequencer, A minor, 112 BPM. Layers: pad+arp
@@ -160,9 +231,9 @@ boss every 5th.
   screenshots verified (palette shift, guide/reticle, beam, skyline, neon).
 - Live URL re-verified after redeploy.
 
-A goofy Pacific Rim: 2–8 friends in a room (4-letter code, no accounts) jointly
-pilot ONE huge, slow, heavy mech. Each pilot is a different body part. Waves of
-goofy kaiju attack a low-poly city. Comedy through coordination failure.
+A cinematic original co-op mech game: 2–8 friends in a room (4-letter code, no accounts) jointly
+pilot ONE huge, heavy mech. Each pilot controls a different system. Waves of
+original kaiju attack a stylized city. Drama comes from coordination under pressure.
 
 ## How to run it
 
@@ -222,7 +293,7 @@ npm test           # both test suites (game logic + websocket integration)
 
 ### Presentation
 - PEAK-ish look: painterly gradient sky, chunky flat-color city with lit
-  windows, parked cars, googly eyes + angry eyebrows on every monster.
+  windows, parked cars, red sensor slits and armored brow plates on monsters.
 - Title screen, 30-second how-to-play, lobby with invite link + mode picker,
   giant always-on "YOU ARE THE LEGS" role banner with key hints, crewmate
   list, HP/laser/credit HUD, per-monster health bars, comedy toasts

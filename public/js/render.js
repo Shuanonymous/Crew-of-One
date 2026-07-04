@@ -1543,20 +1543,17 @@ class PigeonView {
     beak.position.set(0, -0.1, -1.6);
     beak.rotation.x = -Math.PI / 2;
     this.headG.add(beak);
-    // googly eyes + furious brows
+    // predator sensor slits + armored brow plates
     for (const s of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.42, 10, 8),
+      const eye = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.16, 0.08),
         new THREE.MeshBasicMaterial({ color: '#ff2e3f' }));
-      eye.position.set(s * 0.75, 0.3, -0.75);
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6),
-        new THREE.MeshLambertMaterial({ color: '#1d2033' }));
-      pupil.position.z = -0.28;
-      eye.add(pupil);
+      eye.position.set(s * 0.68, 0.34, -1.04);
+      eye.rotation.z = -s * 0.16;
       this.headG.add(eye);
-      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.18, 0.2),
+      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.16, 0.2),
         new THREE.MeshLambertMaterial({ color: '#1d2033' }));
-      brow.position.set(s * 0.75, 0.75, -0.85);
-      brow.rotation.z = -s * 0.5;
+      brow.position.set(s * 0.68, 0.62, -0.98);
+      brow.rotation.z = -s * 0.32;
       this.headG.add(brow);
     }
 

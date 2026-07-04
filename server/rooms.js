@@ -1,4 +1,5 @@
 import { BrawlGame } from './brawl.js';
+import { ClassicWaveGame } from './classic.js';
 import { DuelGame } from './duel.js';
 import { TrainingGame } from './training.js';
 import { PHYSICS_HZ, SNAPSHOT_HZ, MSG, MODES, ROLE, splitRoles } from '../shared/constants.js';
@@ -73,6 +74,9 @@ export class RoomManager {
       case MSG.SHOP_DONE:
         room?.shopDone(id);
         break;
+      case MSG.PAUSE:
+        room?.pause(id, !!msg.paused);
+        break;
       case MSG.AGAIN:
         room?.again(id);
         break;
@@ -112,12 +116,13 @@ export class Room {
     this.manager = manager;
     this.players = new Map(); // id -> { id, ws, name, roles: [], crew: 'A'|'B' }
     this.hostId = null;
-    this.mode = MODES.BRAWL;
+    this.mode = MODES.CLASSIC;
     this.game = null;
     this.loop = null;
     this.snapLoop = null;
     this.roleRotation = 0;    // bump every round so roles shuffle
     this.bestTime = 0;        // best endless survival (seconds) this room has seen
+    this.bestWave = 0;        // best classic wave reached this room has seen
     this.endCounted = false;
   }
 
@@ -209,6 +214,7 @@ export class Room {
     this.game =
       this.mode === MODES.DUEL ? new DuelGame() :
       this.mode === MODES.TRAINING ? new TrainingGame() :
+      this.mode === MODES.CLASSIC ? new ClassicWaveGame(this.bestWave) :
       new BrawlGame(this.bestTime);
     this.endCounted = false;
     if (this.mode === MODES.DUEL) stats.duelsPlayed++;
@@ -246,8 +252,20 @@ export class Room {
 
   input(id, data) {
     const p = this.players.get(id);
-    if (!p || !this.game || !p.roles.length) return;
+    if (!p || !this.game || !p.roles.length || this.game.paused) return;
     this.game.applyInput(p.roles, data, ROLE, p.crew);
+  }
+
+  pause(id, paused) {
+    if (!this.game) return;
+    const canPauseRoom = this.players.size === 1 || this.mode === MODES.TRAINING;
+    if (!canPauseRoom) {
+      const p = this.players.get(id);
+      if (p) send(p.ws, { t: MSG.ERR, msg: 'Settings are personal during multiplayer; step away or ask the host to wait.' });
+      return;
+    }
+    this.game.paused = paused;
+    this.game.pauseReason = paused ? 'settings' : null;
   }
 
   buy(id, item) {
@@ -268,7 +286,7 @@ export class Room {
 
   startLoop() {
     this.stopLoop();
-    this.loop = setInterval(() => this.game?.step(), 1000 / PHYSICS_HZ);
+    this.loop = setInterval(() => { if (this.game && !this.game.paused) this.game.step(); }, 1000 / PHYSICS_HZ);
     this.snapLoop = setInterval(() => {
       if (!this.game) return;
       if (this.game.phase === 'dead' && !this.endCounted) {
@@ -277,8 +295,9 @@ export class Room {
         const t = this.game.summary?.time || 0;
         if (t > this.bestTime) this.bestTime = t;
         if (t > stats.bestSurvivalSec) stats.bestSurvivalSec = t;
+        if (this.game.summary?.wave > this.bestWave) this.bestWave = this.game.summary.wave;
       }
-      const data = JSON.stringify({ t: MSG.STATE, ...this.game.snapshot() });
+      const data = JSON.stringify({ t: MSG.STATE, ...this.game.snapshot(), paused: !!this.game.paused, pauseReason: this.game.pauseReason || null });
       for (const p of this.players.values()) {
         if (p.ws.readyState === p.ws.OPEN) p.ws.send(data);
       }

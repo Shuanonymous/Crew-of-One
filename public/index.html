@@ -20,9 +20,9 @@
   <!-- ============================== TITLE ============================== -->
   <div id="screen-title" class="screen">
     <div class="title-card">
-      <div class="title-kicker">2–8 FRIENDS · ONE GIANT MECH · ZERO COORDINATION</div>
+      <div class="title-kicker">2–8 FRIENDS · ONE GIANT MECH · ONE CREW</div>
       <h1 class="title-logo">CREW<span class="title-of">of</span>ONE</h1>
-      <div class="title-sub">a co-op kaiju brawler where everyone is a different body part</div>
+      <div class="title-sub">cinematic co-op mech combat where every pilot controls a critical system</div>
       <div class="title-form">
         <input id="name-input" maxlength="16" placeholder="your pilot name" autocomplete="off" />
         <button id="btn-create" class="btn btn-big">CREATE ROOM</button>
@@ -31,10 +31,6 @@
           <button id="btn-join" class="btn">JOIN</button>
         </div>
         <button id="btn-howto" class="btn btn-ghost">HOW TO PLAY</button>
-        <div class="support-row">
-          <a class="support-link" href="https://ko-fi.com/YOUR_PAGE_HERE" target="_blank" rel="noopener">☕ SUPPORT THE GAME</a>
-          <a class="support-link" href="https://discord.gg/YOUR_INVITE_HERE" target="_blank" rel="noopener">💬 DISCORD</a>
-        </div>
       </div>
       <div id="title-error" class="error-text"></div>
     </div>
@@ -85,8 +81,11 @@
         <div>
           <div class="lobby-label">MODE <span id="mode-hint" class="mode-hint">(host picks)</span></div>
           <div id="mode-list" class="mode-list">
+            <button class="mode-btn" data-mode="classic">
+              <b>🌊 CLASSIC WAVE MODE</b><span>Beginner-friendly waves, safe between-wave shop, ready up for the next assault.</span>
+            </button>
             <button class="mode-btn" data-mode="brawl">
-              <b>⏱ ENDLESS DEFENSE</b><span>The danger clock never stops. Survive, spend at beacons, beat your best time.</span>
+              <b>⏱ ENDLESS ESCALATION</b><span>Advanced survival. Danger climbs forever; spend at supply beacons under pressure.</span>
             </button>
             <button class="mode-btn" data-mode="duel">
               <b>🤖 MECH DUEL</b><span>Two crews, two mechs, one plaza. Needs 2+ pilots.</span>
@@ -154,10 +153,10 @@
   <div id="screen-shop" class="screen hidden">
     <div class="panel shop-panel">
       <div class="shop-head">
-        <h2>📡 SUPPLY BEACON</h2>
+        <h2 id="shop-title">📡 SUPPLY SHOP</h2>
         
       </div>
-      <div class="shop-sub">Anyone can spend the crew's credits. The fight does NOT pause. Shop fast.</div>
+      <div id="shop-sub" class="shop-sub">Anyone can spend the crew's credits. Classic mode is safe between waves; Endless uses field beacons.</div>
       <div class="shop-credits">CREW CREDITS: <span id="shop-credits">0</span></div>
       <div id="shop-items" class="shop-items"></div>
       <div class="shop-foot">
@@ -174,7 +173,6 @@
       <div id="end-big" class="end-big">MADE IT TO WAVE 4</div>
       <div id="end-stats" class="end-stats"></div>
       <div class="end-foot">
-        <a class="support-link" href="https://ko-fi.com/YOUR_PAGE_HERE" target="_blank" rel="noopener">☕ SUPPORT</a>
         <button id="btn-end-lobby" class="btn btn-ghost">BACK TO LOBBY</button>
         <button id="btn-again" class="btn btn-big">ONE MORE RUN</button>
       </div>
@@ -201,7 +199,8 @@
         <span><i>MOUSE</i> aim · <i>L/R CLICK or J/K</i> punch · <i>HOLD CLICK / E</i> laser</span>
         <span><i>Q</i> ping target/location · <i>X</i> danger ping · <i>ESC</i> settings</span>
       </div>
-      <button id="btn-settings-close" class="btn btn-big">DONE</button>
+      <div id="settings-pause-note" class="mode-hint"></div>
+      <button id="btn-settings-close" class="btn btn-big">RESUME / BACK</button>
     </div>
   </div>
 
