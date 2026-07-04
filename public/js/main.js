@@ -299,11 +299,13 @@ function handleEvents(snap) {
         case 'laserFizzle': if (isMine) { sfx.fizzle(); toast('FIZZLE…'); } break;
         case 'rocketFire': sfx.rocket(); break;
         case 'rocketHit': sfx.clang(1.3); renderer.shake(0.35); hitstop(70); if (ev.p) renderer.ring(ev.p, '#f5d76e', 8, 0.4); break;
-        case 'hurt': if (isMine) { sfx.hurt(); renderer.shake(Math.min(1, 0.25 + (ev.dmg || 5) * 0.03)); } break;
+        case 'hurt': if (isMine && (ev.dmg || 0) >= 3) { sfx.hurt(); renderer.shake(Math.min(0.9, 0.2 + (ev.dmg || 5) * 0.03)); } break;
         case 'fell': sfx.crash(1.5); renderer.shake(1.1); toast(pick(['TIMBER!', 'CLANG!', 'MECH DOWN!'])); renderer.dust(mech.p, 22); renderer.ring(mech.p, '#cbb9a0', 16, 0.7); break;
         case 'getUp': if (isMine) toast('BACK UP!'); break;
         case 'die': if (isMine) { renderer.shake(1.3); } break;
         case 'dmgNum': dmgNumber(ev.p, ev.dmg, ev.laser ? 'laser' : ev.dmg >= 30 ? 'big' : ''); if (ev.laser) sfx.ping(); break;
+        case 'dash': sfx.whoosh(); renderer.ring(mech.p, '#8aa5ff', 10, 0.4); break;
+        case 'turretFire': sfx.click(); if (ev.to) renderer.burst(ev.to, '#ffd166', 3, 8); break;
       }
     }
   }
@@ -334,14 +336,13 @@ function handleEvents(snap) {
   for (const ev of snap.ev || []) {
     switch (ev.what) {
       case 'kill': sfx.ding(); toast(`+${ev.credits}© ${KILL_TEXT[ev.type] || 'KAIJU DOWN'}`); break;
-      case 'waveStart': {
-        renderer.setPalette(ev.wave - 1);
-        if (ev.boss) { banner(`⚠ ${ev.boss} ⚠`, 3400); sfx.roar(0.3); }
-        else banner(`WAVE ${ev.wave} — ${ev.count} INCOMING`, 2600);
-        sfx.roar(0.8);
-        break;
-      }
-      case 'waveClear': sfx.fanfare(); banner(`WAVE ${ev.wave} CLEAR!`, 2400); break;
+      case 'runStart': banner(`SECTOR ${ev.seed} — SURVIVE`, 3000); break;
+      case 'bossArrives': banner(`⚠ ${ev.name} ⚠`, 3800); sfx.roar(0.3); renderer.shake(0.8); break;
+      case 'tankBoom': sfx.crash(1.8); renderer.shake(0.8); if (ev.p) { renderer.ring(ev.p, '#ff9d4d', 15, 0.7); renderer.burst(ev.p, '#ff9d4d', 26, 20); renderer.scorch(ev.p, 5); } break;
+      case 'cacheOpen': sfx.buy(); toast(`SUPPLY CACHE +${ev.credits}©`); break;
+      case 'pickup': sfx.ding(); break;
+      case 'stationDown': toast('REPAIR STATION DESTROYED'); sfx.crash(1); break;
+      case 'healing': sfx.ding(); break;
       case 'buy': sfx.buy(); toast(ev.item + '!'); break;
       case 'runOver': sfx.sad(); break;
       case 'duelOver': sfx.fanfare(); break;
@@ -367,14 +368,20 @@ function updateHud(snap) {
   }
 
   if (state.mode === MODES.BRAWL) {
-    if (snap.wave !== state.lastWave) {
-      state.lastWave = snap.wave;
-      $('wave-pill').textContent = 'WAVE ' + Math.max(1, snap.wave);
-    }
+    const mm = Math.floor(snap.runTime / 60), ss = String(Math.floor(snap.runTime % 60)).padStart(2, '0');
+    $('wave-pill').textContent = `⚠ DANGER ${snap.danger.toFixed(1)} · ${mm}:${ss}`;
     if (snap.credits !== state.lastCredits) {
       state.lastCredits = snap.credits;
       $('credits-pill').textContent = '© ' + snap.credits;
       $('shop-credits').textContent = snap.credits;
+    }
+    // proximity shop: open while standing at a beacon (danger doesn't pause)
+    if (snap.shopOpen && state.screen === 'game') {
+      show('shop');
+      renderShopItems(snap);
+    } else if (!snap.shopOpen && state.screen === 'shop') {
+      show('game');
+    } else if (snap.shopOpen) {
       renderShopItems(snap);
     }
   }
@@ -397,8 +404,9 @@ function updateHud(snap) {
   } else {
     $('boss-bar').classList.add('hidden');
   }
-  if (state.screen === 'game' && snap.phase === PHASE.FIGHT) {
-    music.setState(snap.bossBar ? 'boss' : 'wave');
+  if ((state.screen === 'game' || state.screen === 'shop') && snap.phase === PHASE.FIGHT) {
+    if (state.mode === MODES.BRAWL) music.setIntensity(Math.min(1, (snap.danger || 0) / 8), !!snap.bossBar);
+    else music.setState(snap.bossBar ? 'boss' : 'wave');
   }
 
   // laser scorch marks where the beam meets the street
@@ -431,23 +439,7 @@ function handlePhase(snap) {
   const prev = state.lastPhase;
   state.lastPhase = snap.phase;
 
-  if (snap.phase === PHASE.SHOP && state.mode === MODES.BRAWL) {
-    state.shopOpen = true;
-    // wave 0 = pre-run "get ready" pause: skip the shop UI, just show a banner
-    if (snap.wave === 0) {
-      state.shopOpen = false;
-      return;
-    }
-    show('shop');
-    renderShopItems(snap);
-    $('btn-shop-done').classList.toggle('hidden', !state.isHost);
-    $('click-catch').classList.add('hidden');
-    if (document.pointerLockElement) document.exitPointerLock?.();
-  } else if (state.shopOpen && snap.phase === PHASE.FIGHT) {
-    state.shopOpen = false;
-    show('game');
-    if (!state.spectator) $('click-catch').classList.remove('hidden');
-  } else if (snap.phase === PHASE.DEAD && !state.endShown) {
+  if (snap.phase === PHASE.DEAD && !state.endShown) {
     state.endShown = true;
     showEnd(snap);
   } else if (snap.phase === PHASE.WIN && !state.endShown) {
@@ -468,15 +460,18 @@ function renderShopItems(snap) {
   for (const item of SHOP) {
     const btn = document.createElement('button');
     btn.className = 'shop-item';
-    const owned = !item.repeat && mine?.up?.[item.id];
+    const up = mine?.up?.[item.id];
+    const owned = typeof up === 'boolean' && up === true && !item.priceGrowth && !item.repeat;
+    const tier = typeof up === 'number' && up > 0 ? ` [T${up}]` : '';
+    const price = snap?.prices?.[item.id] ?? item.price;
     if (owned) btn.classList.add('owned');
-    btn.disabled = owned || (snap && snap.credits < item.price);
-    btn.innerHTML = `<b>${item.name}</b><span class="si-desc">${item.desc}</span>
-      <span class="si-price">${owned ? 'OWNED ✓' : '© ' + item.price}</span>`;
+    btn.disabled = owned || (snap && snap.credits < price);
+    btn.innerHTML = `<b>${item.name}${tier}</b><span class="si-desc">${item.desc}</span>
+      <span class="si-price">${owned ? 'INSTALLED ✓' : '© ' + price}</span>`;
     btn.onclick = () => { sfx.click(); net.send({ t: 'buy', item: item.id }); };
     wrap.appendChild(btn);
   }
-  $('shop-hint').textContent = state.isHost ? '' : 'Host can start the next wave early';
+  $('shop-hint').textContent = 'Walk away from the beacon to close. Monsters do not wait.';
 }
 $('btn-shop-done').onclick = () => { sfx.click(); net.send({ t: 'shopDone' }); };
 
@@ -488,10 +483,13 @@ function showEnd(snap) {
   show('end');
   const stats = [];
   if (state.mode === MODES.BRAWL) {
-    $('end-title').textContent = 'THE MECH IS DOWN';
-    $('end-big').textContent = `MADE IT TO WAVE ${s.wave || 1}`;
-    stats.push([s.kills || 0, 'KAIJU BONKED'], [s.creditsEarned || 0, 'CREDITS EARNED'],
-      [s.punches || 0, 'PUNCHES'], [s.kicks || 0, 'KICKS'], [s.lasers || 0, 'LASERS'], [s.falls || 0, 'FACEPLANTS']);
+    const mm = Math.floor((s.time || 0) / 60), ss = String((s.time || 0) % 60).padStart(2, '0');
+    const bm = Math.floor((s.bestTime || 0) / 60), bs = String((s.bestTime || 0) % 60).padStart(2, '0');
+    $('end-title').textContent = 'HULL INTEGRITY ZERO — SECTOR ' + (s.seed || '?????');
+    $('end-big').textContent = (s.newBest ? '★ NEW RECORD — ' : '') + `SURVIVED ${mm}:${ss}`;
+    stats.push([`${bm}:${bs}`, 'ROOM BEST'], [s.kills || 0, 'KAIJU DOWN'], [s.creditsEarned || 0, 'CREDITS EARNED'],
+      [s.byPart?.ARMS || 0, 'DMG · ARMS'], [s.byPart?.LEGS || 0, 'DMG · LEGS'], [s.byPart?.HEAD || 0, 'DMG · HEAD']);
+    if (s.byPart?.TURRET) stats.push([s.byPart.TURRET, 'DMG · TURRET']);
   } else if (state.mode === MODES.DUEL) {
     const won = s.winner === state.myCrew;
     $('end-title').textContent = 'DUEL OVER';
@@ -526,6 +524,65 @@ net.onStatus = (s) => {
   $('conn-status').classList.toggle('hidden', !s);
 };
 
+// ------------------------------------------------------------ pings
+const pings = [];
+net.onPing = (msg) => { pings.push({ ...msg, t: performance.now() }); sfx.ping(); };
+window.addEventListener('keydown', (e) => {
+  if (!state.playing || state.spectator) return;
+  const snap = net.latest();
+  const mine = snap && myMech(snap);
+  if (!mine) return;
+  if (e.code === 'KeyQ') {
+    const p = mine.laser.aim || mine.p;
+    net.send({ t: 'ping', p, kind: mine.laser.aimHit ? 'attack' : 'go' });
+  } else if (e.code === 'KeyX') {
+    net.send({ t: 'ping', p: mine.p, kind: 'danger' });
+  }
+});
+const PING_LOOKS = { attack: ['⚔ ATTACK', '#ff5d5d'], go: ['▸ GO HERE', '#5cff8f'], danger: ['⚠ DANGER', '#ffd166'] };
+function drawPings() {
+  const layer = $('ping-layer');
+  layer.innerHTML = '';
+  const now = performance.now();
+  const snap = net.latest();
+  const mine = snap && state.playing ? myMech(snap) : null;
+  for (const p of pings) {
+    if (now - p.t > 6000) continue;
+    const s = renderer.worldToScreen(p.p);
+    if (!s) continue;
+    const [label, color] = PING_LOOKS[p.kind] || PING_LOOKS.go;
+    const dist = mine ? Math.round(Math.hypot(p.p[0] - mine.p[0], p.p[2] - mine.p[2])) : '';
+    const el = document.createElement('div');
+    el.className = 'ping-marker';
+    el.style.left = s.x + 'px'; el.style.top = s.y + 'px'; el.style.color = color;
+    el.innerHTML = `${label}<span>${p.name}${dist !== '' ? ' · ' + dist + 'm' : ''}</span>`;
+    layer.appendChild(el);
+  }
+  while (pings.length && now - pings[0].t > 6000) pings.shift();
+}
+
+// ---------------------------------------------------------- settings
+const settings = { master: 0.5, music: 0.32, sfxShake: 1, quality: 'medium' };
+try { Object.assign(settings, JSON.parse(localStorage.getItem('coo-settings') || '{}')); } catch {}
+function applySettings() {
+  if (sfx.master) sfx.master.gain.value = settings.master;
+  if (music.bus) music.bus.gain.value = settings.music;
+  renderer.shakeMult = settings.sfxShake;
+  renderer.setQuality?.(settings.quality);
+  try { localStorage.setItem('coo-settings', JSON.stringify(settings)); } catch {}
+}
+$('btn-settings').onclick = () => { sfx.click(); $('screen-settings').classList.remove('hidden'); };
+$('btn-settings-close').onclick = () => { sfx.click(); $('screen-settings').classList.add('hidden'); applySettings(); };
+$('set-master').oninput = (e) => { settings.master = +e.target.value; applySettings(); };
+$('set-music').oninput = (e) => { settings.music = +e.target.value; applySettings(); };
+$('set-shake').onchange = (e) => { settings.sfxShake = +e.target.value; applySettings(); };
+$('set-quality').onchange = (e) => { settings.quality = e.target.value; applySettings(); };
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' && !document.pointerLockElement && state.playing) {
+    $('screen-settings').classList.toggle('hidden');
+  }
+});
+
 // --------------------------------------------------------- main loop
 net.connect();
 show('title');
@@ -549,9 +606,11 @@ function frame(now) {
     renderer.updateCamera(now / 9000, -0.28, null, Math.max(dt, 0.0001));
   }
   renderer.render();
+  drawPings();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+applySettings();
 
 // A little city to look at behind the title screen
 fetchTitleCity();

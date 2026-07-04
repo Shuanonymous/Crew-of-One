@@ -53,9 +53,20 @@ class Sfx {
 
   ready() { return this.enabled && this.ctx; }
 
+  // per-sound-type instance caps: max ~3 of any small sound in a 160 ms
+  // window; big moments (crash, laserFire, fanfare, roar) always play.
+  gate(name, cap = 3) {
+    const now = performance.now();
+    this._g = this._g || {};
+    const list = (this._g[name] = (this._g[name] || []).filter((t) => now - t < 160));
+    if (list.length >= cap) return false;
+    list.push(now);
+    return true;
+  }
+
   // ------------------------------------------------------------ effects
   thud(big = 1) { // footsteps, landings
-    if (!this.ready()) return;
+    if (!this.ready() || !this.gate('thud')) return;
     const t = this.now();
     const o = this.osc('sine', 52 * (big > 1 ? 0.8 : 1), t, 0.25);
     o.frequency.exponentialRampToValueAtTime(28, t + 0.22);
@@ -68,7 +79,7 @@ class Sfx {
   }
 
   whoosh() { // punch windup
-    if (!this.ready()) return;
+    if (!this.ready() || !this.gate('whoosh')) return;
     const t = this.now();
     const n = this.noise(t, 0.35);
     const f = this.ctx.createBiquadFilter();
@@ -80,7 +91,7 @@ class Sfx {
   }
 
   clang(strong = 1) { // punch/kick lands — with a chest-deep sub layer
-    if (!this.ready()) return;
+    if (!this.ready() || !this.gate('clang')) return;
     const t = this.now();
     for (const [freq, amp] of [[210, 0.7], [335, 0.4], [523, 0.25]]) {
       const o = this.osc('square', freq * (0.9 + Math.random() * 0.2), t, 0.3);
@@ -94,14 +105,14 @@ class Sfx {
   }
 
   ping() { // laser hitmarker
-    if (!this.ready()) return;
+    if (!this.ready() || !this.gate('ping')) return;
     const t = this.now();
     const o = this.osc('sine', 1560, t, 0.09);
     this.env(o, t, 0.002, 0.22, 0.08);
   }
 
   splat() { // spitter glob lands
-    if (!this.ready()) return;
+    if (!this.ready() || !this.gate('splat', 2)) return;
     const t = this.now();
     const o = this.osc('sine', 220, t, 0.25);
     o.frequency.exponentialRampToValueAtTime(60, t + 0.2);
@@ -114,7 +125,7 @@ class Sfx {
   }
 
   screech(pitch = 1) { // flyer dive
-    if (!this.ready()) return;
+    if (!this.ready() || !this.gate('screech', 2)) return;
     const t = this.now();
     const o = this.osc('sawtooth', 900 * pitch, t, 0.5);
     o.frequency.exponentialRampToValueAtTime(420 * pitch, t + 0.45);
@@ -168,7 +179,7 @@ class Sfx {
   }
 
   roar(pitch = 1) { // monster spawn/telegraph
-    if (!this.ready()) return;
+    if (!this.ready() || !this.gate('roar')) return;
     const t = this.now();
     const o = this.osc('sawtooth', 110 * pitch, t, 0.6);
     o.frequency.setValueAtTime(110 * pitch, t);
@@ -180,7 +191,7 @@ class Sfx {
   }
 
   coo() { // pigeon. it's still a pigeon.
-    if (!this.ready()) return;
+    if (!this.ready() || !this.gate('coo', 2)) return;
     const t = this.now();
     for (let i = 0; i < 3; i++) {
       const o = this.osc('sine', 480 - i * 60, t + i * 0.09, 0.09);
@@ -190,7 +201,7 @@ class Sfx {
   }
 
   squish() { // monster dies
-    if (!this.ready()) return;
+    if (!this.ready() || !this.gate('squish')) return;
     const t = this.now();
     const o = this.osc('sine', 300, t, 0.5);
     o.frequency.exponentialRampToValueAtTime(50, t + 0.45);
@@ -203,7 +214,7 @@ class Sfx {
   }
 
   hurt() { // mech takes a hit
-    if (!this.ready()) return;
+    if (!this.ready() || !this.gate('hurt', 2)) return;
     const t = this.now();
     const o = this.osc('square', 140, t, 0.2);
     o.frequency.exponentialRampToValueAtTime(90, t + 0.18);
@@ -213,7 +224,7 @@ class Sfx {
   }
 
   ding() { // credits
-    if (!this.ready()) return;
+    if (!this.ready() || !this.gate('ding')) return;
     const t = this.now();
     const o = this.osc('sine', 880, t, 0.3);
     this.env(o, t, 0.005, 0.3, 0.28);

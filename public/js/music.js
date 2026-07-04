@@ -38,6 +38,25 @@ class Music {
     this.timer = setInterval(() => this.schedule(), 90);
   }
 
+  // danger-driven continuous mix (0..1) + boss layer flag
+  setIntensity(x, boss = false) {
+    if (!this.ctx) return;
+    this.state = boss ? 'boss' : 'wave';
+    const t = this.ctx.currentTime;
+    const g = this.layers;
+    const tgt = {
+      pad: 0.75 - 0.3 * x,
+      arp: 0.4 + 0.3 * x,
+      drums: x < 0.12 ? 0 : 0.35 + 0.65 * x,
+      bass: x < 0.25 ? 0 : 0.3 + 0.6 * x,
+      lead: boss ? 0.7 : 0,
+    };
+    for (const [k, v] of Object.entries(tgt)) {
+      g[k].gain.cancelScheduledValues(t);
+      g[k].gain.setTargetAtTime(v, t, 1.5);
+    }
+  }
+
   setState(state) {
     if (!this.ctx || state === this.state) return;
     this.state = state;

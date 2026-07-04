@@ -81,6 +81,7 @@ export class Input {
       if (k.has('KeyD') || k.has('ArrowRight')) move.x += 1;
       data.move = move;
       data.kick = k.has('Space');
+      data.dash = k.has('KeyF');
     }
     // Both arms: left click = left fist, right click = right fist.
     // One arm only: either button throws your one punch.

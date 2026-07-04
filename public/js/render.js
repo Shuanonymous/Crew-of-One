@@ -13,6 +13,8 @@ const V3 = THREE.Vector3;
 
 // The run is a journey: sunset -> dusk -> neon night -> dawn, per wave.
 const PALETTES = [
+  { name: 'nightrain', sky: ['#0a0d1c', '#141833', '#252048', '#3a2a5e'], fog: '#1d1b33',
+    hemi: ['#7d8fc9', '#1d1a33'], sun: '#8fa3d9', sunI: 1.1, sunPos: [-60, 50, -40], amb: 0.85, sunDisc: '#dfe6ff' },
   { name: 'sunset', sky: ['#5d7ec9', '#9b8fd4', '#f2a08a', '#f9c46b'], fog: '#e89a80',
     hemi: ['#ffe8c9', '#6b5d8f'], sun: '#ffc27d', sunI: 2.2, sunPos: [80, 38, 30], amb: 1.0, sunDisc: '#ffd9a0' },
   { name: 'dusk', sky: ['#2c2a5e', '#5d4a8f', '#b0628f', '#e8896b'], fog: '#8f5a7a',
@@ -95,6 +97,31 @@ export class Renderer {
       this.embers.push({ m, vy: 0.4 + Math.random() * 0.8, ph: Math.random() * 9 });
     }
 
+    // RAIN: a pool of thin streaks that fall around the camera
+    this.rain = [];
+    const rainMat = new THREE.MeshBasicMaterial({ color: '#8fa3cc', transparent: true, opacity: 0.5 });
+    for (let i = 0; i < 260; i++) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 2.6), rainMat);
+      m.position.set((Math.random() - 0.5) * 140, Math.random() * 60, (Math.random() - 0.5) * 140);
+      this.scene.add(m);
+      this.rain.push(m);
+    }
+    // SEARCHLIGHTS: sweeping cones over the district
+    this.searchlights = [];
+    for (let i = 0; i < 3; i++) {
+      const cone = new THREE.Mesh(
+        new THREE.ConeGeometry(14, 130, 12, 1, true),
+        new THREE.MeshBasicMaterial({ color: '#aebfff', transparent: true, opacity: 0.06, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })
+      );
+      cone.geometry.translate(0, 65, 0);
+      cone.rotation.x = Math.PI;
+      cone.position.set((i - 1) * 90, 130, -60 + i * 60);
+      this.scene.add(cone);
+      this.searchlights.push({ cone, ph: i * 2.1 });
+    }
+    this.lightningT = 4 + Math.random() * 8;
+    this.flash = 0;
+
     this.worldGroup = new THREE.Group();
     this.scene.add(this.worldGroup);
     this.mechViews = new Map();
@@ -123,6 +150,22 @@ export class Renderer {
     this.resize();
   }
 
+  setQuality(q) {
+    const opts = {
+      low: { pr: 0.75, shadows: false, bloom: 0, fog: 190, embers: 0 },
+      medium: { pr: 1, shadows: true, bloom: 0.55, fog: 320, embers: 40 },
+      high: { pr: Math.min(window.devicePixelRatio, 2), shadows: true, bloom: 0.7, fog: 420, embers: 70 },
+    }[q] || {};
+    if (!opts.pr) return;
+    this.renderer.setPixelRatio(opts.pr);
+    this.renderer.shadowMap.enabled = opts.shadows;
+    this.sun.castShadow = opts.shadows;
+    if (this.bloom) this.bloom.strength = opts.bloom;
+    this.scene.fog.far = opts.fog;
+    this.embers.forEach((e, i) => { e.m.visible = i < opts.embers; });
+    this.resize();
+  }
+
   resize() {
     const w = window.innerWidth, h = window.innerHeight;
     this.renderer.setSize(w, h);
@@ -131,7 +174,11 @@ export class Renderer {
     this.camera.updateProjectionMatrix();
   }
 
-  shake(amount) { this.trauma = Math.min(1.6, this.trauma + amount); }
+  shake(amount) {
+    // global budget: single hits clamp at 0.9, total never exceeds 1.2
+    const a = Math.min(0.9, amount) * (this.shakeMult ?? 1);
+    this.trauma = Math.min(1.2, this.trauma + a);
+  }
 
   // ------------------------------------------------ palettes / atmosphere
   setPalette(i) {
@@ -184,6 +231,29 @@ export class Renderer {
       this.applyPalette(this.currentPalette());
     }
     const t = performance.now() / 1000;
+    // rain falls around the camera
+    for (const r of this.rain) {
+      r.position.y -= dt * 46;
+      if (r.position.y < 0) {
+        r.position.set(this.camPos.x + (Math.random() - 0.5) * 140, 55 + Math.random() * 10, this.camPos.z + (Math.random() - 0.5) * 140);
+      }
+      r.quaternion.copy(this.camera.quaternion);
+    }
+    // searchlights sweep slowly
+    for (const s of this.searchlights) {
+      s.cone.rotation.z = Math.sin(t * 0.21 + s.ph) * 0.5;
+      s.cone.rotation.x = Math.PI + Math.cos(t * 0.17 + s.ph) * 0.35;
+    }
+    // horizon lightning: a sudden hemi flash, then decay
+    this.lightningT -= dt;
+    if (this.lightningT <= 0) {
+      this.lightningT = 6 + Math.random() * 14;
+      this.flash = 1;
+    }
+    if (this.flash > 0) {
+      this.flash = Math.max(0, this.flash - dt * 3.5);
+      this.hemi.intensity = (this.palB.amb ?? 0.6) + this.flash * 1.6;
+    }
     for (const e of this.embers) {
       e.m.position.y += e.vy * dt;
       e.m.position.x += Math.sin(t * 0.6 + e.ph) * dt * 0.8;
@@ -247,6 +317,31 @@ export class Renderer {
   // ------------------------------------------------------------ world
   clearWorld() {
     this.scene.remove(this.worldGroup);
+    // RAIN: a pool of thin streaks that fall around the camera
+    this.rain = [];
+    const rainMat = new THREE.MeshBasicMaterial({ color: '#8fa3cc', transparent: true, opacity: 0.5 });
+    for (let i = 0; i < 260; i++) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 2.6), rainMat);
+      m.position.set((Math.random() - 0.5) * 140, Math.random() * 60, (Math.random() - 0.5) * 140);
+      this.scene.add(m);
+      this.rain.push(m);
+    }
+    // SEARCHLIGHTS: sweeping cones over the district
+    this.searchlights = [];
+    for (let i = 0; i < 3; i++) {
+      const cone = new THREE.Mesh(
+        new THREE.ConeGeometry(14, 130, 12, 1, true),
+        new THREE.MeshBasicMaterial({ color: '#aebfff', transparent: true, opacity: 0.06, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })
+      );
+      cone.geometry.translate(0, 65, 0);
+      cone.rotation.x = Math.PI;
+      cone.position.set((i - 1) * 90, 130, -60 + i * 60);
+      this.scene.add(cone);
+      this.searchlights.push({ cone, ph: i * 2.1 });
+    }
+    this.lightningT = 4 + Math.random() * 8;
+    this.flash = 0;
+
     this.worldGroup = new THREE.Group();
     this.scene.add(this.worldGroup);
     for (const v of this.mechViews.values()) v.dispose(this.scene);
@@ -280,6 +375,24 @@ export class Renderer {
         mesh.position.set(...d.p);
         mesh.receiveShadow = true;
         g.add(mesh);
+      } else if (d.kind === 'river') {
+        const mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(d.size[0], d.size[1]),
+          new THREE.MeshBasicMaterial({ color: '#0a1428', transparent: true, opacity: 0.92 })
+        );
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set(d.p[0], d.p[1], d.p[2]);
+        g.add(mesh);
+      } else if (d.kind === 'landmark') {
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(...d.size),
+          new THREE.MeshLambertMaterial({ color: d.color, map: this.windowTex }));
+        mesh.position.set(...d.p);
+        mesh.castShadow = true;
+        g.add(mesh);
+        const cap = new THREE.Mesh(new THREE.SphereGeometry(2.2, 8, 6),
+          new THREE.MeshBasicMaterial({ color: '#ff4d5e' }));
+        cap.position.set(d.p[0], d.p[1] + d.size[1] / 2 + 2, d.p[2]);
+        g.add(cap);
       } else if (d.kind === 'building') {
         const mat = new THREE.MeshLambertMaterial({ color: d.color, map: d.windows ? this.windowTex : null });
         const mesh = new THREE.Mesh(new THREE.BoxGeometry(...d.size), mat);
@@ -298,6 +411,61 @@ export class Renderer {
         this.decorateBuilding(g, d);
       }
     }
+
+    // endless-run interactables
+    this.beaconViews = [];
+    for (const b of world.beacons || []) {
+      const grp = new THREE.Group();
+      const pylon = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.4, 9, 8),
+        new THREE.MeshLambertMaterial({ color: '#2a3145' }));
+      pylon.position.y = 4.5;
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(1.1, 10, 8),
+        new THREE.MeshBasicMaterial({ color: '#4dfff0' }));
+      lamp.position.y = 10;
+      const ring = new THREE.Mesh(new THREE.RingGeometry(7.6, 9, 40),
+        new THREE.MeshBasicMaterial({ color: '#4dfff0', transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.15;
+      grp.add(pylon, lamp, ring);
+      grp.position.set(b.p[0], 0, b.p[2]);
+      g.add(grp);
+      this.beaconViews.push({ grp, lamp, ring });
+    }
+    this.tankViews = [];
+    for (const t of world.tanks || []) {
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(2, 2.2, 4.5, 10),
+        new THREE.MeshLambertMaterial({ color: '#b8622e' }));
+      m.position.set(t.p[0], 2.2, t.p[2]);
+      m.castShadow = true;
+      g.add(m);
+      this.tankViews.push(m);
+    }
+    this.stationViews = [];
+    for (const s of world.stations || []) {
+      const grp = new THREE.Group();
+      const pad = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 0.5, 20),
+        new THREE.MeshLambertMaterial({ color: '#1d3a4a' }));
+      pad.position.y = 0.25;
+      const glow = new THREE.Mesh(new THREE.RingGeometry(7.5, 8.6, 30),
+        new THREE.MeshBasicMaterial({ color: '#5cff8f', transparent: true, opacity: 0.5, side: THREE.DoubleSide }));
+      glow.rotation.x = -Math.PI / 2;
+      glow.position.y = 0.6;
+      grp.add(pad, glow);
+      grp.position.set(s.p[0], 0, s.p[2]);
+      g.add(grp);
+      this.stationViews.push(grp);
+    }
+    this.cacheViews = [];
+    for (const c of world.caches || []) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3),
+        new THREE.MeshLambertMaterial({ color: '#8f7a2e' }));
+      m.position.set(c.p[0], 1.5, c.p[2]);
+      m.rotation.y = 0.5;
+      m.castShadow = true;
+      g.add(m);
+      this.cacheViews.push(m);
+    }
+    this.pickupMeshes = new Map();
 
     // training props
     if (world.rings) {
@@ -467,6 +635,29 @@ export class Renderer {
       if (!seenPj.has(id)) { this.scene.remove(m); this.projMeshes.delete(id); }
     }
 
+    // credit pickups: glowing chips
+    const seenPk = new Set();
+    for (const pk of b.pickups || []) {
+      seenPk.add(pk.id);
+      let m = this.pickupMeshes.get(pk.id);
+      if (!m) {
+        m = new THREE.Mesh(new THREE.OctahedronGeometry(0.9),
+          new THREE.MeshBasicMaterial({ color: '#ffd166' }));
+        this.scene.add(m);
+        this.pickupMeshes.set(pk.id, m);
+      }
+      m.position.set(pk.p[0], 1.4 + Math.sin(performance.now() / 300) * 0.4, pk.p[2]);
+      m.rotation.y += dt * 3;
+    }
+    for (const [id, m] of this.pickupMeshes) {
+      if (!seenPk.has(id)) { this.scene.remove(m); this.pickupMeshes.delete(id); }
+    }
+    // interactable liveness
+    if (b.inter) {
+      b.inter.tanks?.forEach((alive, i) => { if (this.tankViews[i]) this.tankViews[i].visible = alive; });
+      b.inter.caches?.forEach((alive, i) => { if (this.cacheViews[i]) this.cacheViews[i].visible = alive; });
+      b.inter.stations?.forEach((st, i) => { if (this.stationViews[i]) this.stationViews[i].visible = st.alive; });
+    }
     if (b.crates && this.crateMeshes.length) {
       b.crates.forEach((c, i) => {
         const mesh = this.crateMeshes[i];
@@ -928,29 +1119,15 @@ class CrabView {
     under.position.y = -1.1;
     this.root.add(under);
 
-    // eyestalks with googly eyes
+    // predator eye slits — dangerous, not adorable
     this.eyes = [];
     for (const s of [-1, 1]) {
-      const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 1.8), dark);
-      stalk.position.set(s * 1.1, 2.0, -1.6);
-      this.root.add(stalk);
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.62, 10, 8),
-        new THREE.MeshLambertMaterial({ color: '#ffffff' }));
-      eye.position.set(s * 1.1, 3.0, -1.6);
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6),
-        new THREE.MeshLambertMaterial({ color: '#1d2033' }));
-      pupil.position.z = -0.42;
-      eye.add(pupil);
+      const eye = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.22, 0.3),
+        new THREE.MeshBasicMaterial({ color: '#ff2e3f' }));
+      eye.position.set(s * 1.1, 1.6, -2.1);
+      eye.rotation.z = -s * 0.28;
       this.root.add(eye);
-      this.eyes.push({ eye, pupil });
-    }
-    // angry eyebrows. crucial.
-    for (const s of [-1, 1]) {
-      const brow = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.25, 0.25),
-        new THREE.MeshLambertMaterial({ color: '#1d2033' }));
-      brow.position.set(s * 1.1, 3.6, -1.7);
-      brow.rotation.z = -s * 0.45;
-      this.root.add(brow);
+      this.eyes.push({ eye });
     }
 
     // claws
@@ -1058,10 +1235,9 @@ class CrabView {
       c.rotation.x = damp(c.rotation.x, want, tele ? 8 : 16, dt);
     });
 
-    // googly rage
+    // eye slits pulse hotter during telegraphs
     for (const e of this.eyes) {
-      e.pupil.position.x = Math.sin(this.scuttle * 1.7) * 0.13;
-      e.pupil.position.y = Math.cos(this.scuttle * 1.3) * 0.1;
+      e.eye.material.color.set(tele ? '#ff6b3f' : '#ff2e3f');
     }
 
     this.bar.update(this.root.position, 5.2 * this.baseScale, mb.hp / mb.maxHp);
@@ -1094,7 +1270,7 @@ class SpitterView {
     this.root.add(this.snout);
     for (const s of [-1, 1]) {
       const eye = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 8),
-        new THREE.MeshLambertMaterial({ color: '#ffffff' }));
+        new THREE.MeshBasicMaterial({ color: '#ff2e3f' }));
       eye.position.set(s * 1.2, 1.6, -1.2);
       const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6),
         new THREE.MeshLambertMaterial({ color: '#1d2033' }));
@@ -1168,7 +1344,7 @@ class FlyerView {
       brow.rotation.z = -s * 0.5;
       this.root.add(brow);
       const eye = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6),
-        new THREE.MeshLambertMaterial({ color: '#ffffff' }));
+        new THREE.MeshBasicMaterial({ color: '#ff2e3f' }));
       eye.position.set(s * 0.5, 0.75, -2.7);
       this.root.add(eye);
     }
@@ -1238,7 +1414,7 @@ class SwarmView {
     body.castShadow = true;
     this.root.add(body);
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6),
-      new THREE.MeshLambertMaterial({ color: '#ffffff' }));
+      new THREE.MeshBasicMaterial({ color: '#ff2e3f' }));
     eye.position.set(0, 0.25, -0.55);
     const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.15, 6, 6),
       new THREE.MeshLambertMaterial({ color: '#1d2033' }));
@@ -1343,7 +1519,7 @@ class PigeonView {
     // googly eyes + furious brows
     for (const s of [-1, 1]) {
       const eye = new THREE.Mesh(new THREE.SphereGeometry(0.42, 10, 8),
-        new THREE.MeshLambertMaterial({ color: '#ffffff' }));
+        new THREE.MeshBasicMaterial({ color: '#ff2e3f' }));
       eye.position.set(s * 0.75, 0.3, -0.75);
       const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6),
         new THREE.MeshLambertMaterial({ color: '#1d2033' }));

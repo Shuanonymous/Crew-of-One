@@ -49,6 +49,7 @@ export class Net {
           this.onSnapshot(msg);
           break;
         case MSG.ERR: this.onErr(msg.msg); break;
+        case 'ping': this.onPing?.(msg); break;
       }
     };
   }
