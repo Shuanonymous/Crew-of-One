@@ -1,6 +1,7 @@
 // Direct harness tests for the game logic (no network).
 // Run: node test/server-logic.test.js — exits nonzero on failure.
 import { BrawlGame } from '../server/brawl.js';
+import { ClassicWaveGame } from '../server/classic.js';
 import { DuelGame } from '../server/duel.js';
 import { TrainingGame } from '../server/training.js';
 import { Monster } from '../server/monsters.js';
@@ -71,6 +72,27 @@ function quietGame() { // endless game with the spawner muzzled
   const s = g.snapshot().summary;
   check('summary has time/seed/byPart/bestTime', s && s.seed === g.seed && s.byPart && s.bestTime >= 120,
     JSON.stringify({ time: s?.time, best: s?.bestTime, byPart: s?.byPart }));
+}
+
+
+// -------------------------------------------------------- CLASSIC WAVE SHOP
+{
+  const g = new ClassicWaveGame();
+  check('classic starts in wave fight', g.phase === PHASE.FIGHT && g.wave === 1 && g.monsters.length > 0, `phase=${g.phase} wave=${g.wave}`);
+  for (const m of [...g.monsters]) m.takeHit(9999, null, 0, 'laser');
+  stepFor(g, 0.2);
+  check('classic opens safe shop after wave clear', g.phase === PHASE.SHOP && g.snapshot().shopSafe === true, `phase=${g.phase}`);
+  g.credits = 1000;
+  const hp0 = g.mech.hp = 35;
+  const repair = g.buy('repair');
+  check('classic shop repair spends credits and heals', repair.ok && g.credits < 1000 && g.mech.hp > hp0, `credits=${g.credits} hp=${g.mech.hp}`);
+  const dmg = g.buy('dmg');
+  check('classic shop upgrade applies stat tier', dmg.ok && g.mech.upgrades.dmg === 1, `dmg=${g.mech.upgrades.dmg}`);
+  g.shopDone();
+  stepFor(g, 0.1);
+  check('classic ready starts next wave', g.phase === PHASE.FIGHT && g.wave === 2, `phase=${g.phase} wave=${g.wave}`);
+  const blocked = g.buy('speed');
+  check('classic rejects buying during combat', !blocked.ok && blocked.reason.includes('between waves'), blocked.reason);
 }
 
 // -------------------------------------------------------- MOVEMENT & FEEL

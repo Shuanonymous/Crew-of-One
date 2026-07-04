@@ -2,15 +2,13 @@
 
 **PLAY IT: https://crew-of-one.onrender.com**
 
-A co-op kaiju brawler for your browser. 2–8 friends join a room with a
-4-letter code and jointly pilot **ONE huge, slow, heavy mech** — someone is
-the LEGS, someone is the ARMS, someone is the HEAD with the eye laser that
-roots the whole mech for 3 seconds while it charges. Goofy giant crabs and an
-enormous furious pigeon attack a pastel low-poly city. Coordination is the
-game; failing at it is the comedy.
+A cinematic co-op kaiju brawler for your browser. 2–8 friends join a room with a
+4-letter code and jointly pilot **ONE huge, heavy mech** — someone drives
+the legs, someone controls the arms, and someone aims the head-mounted beam.
+Original monsters attack a neon city while the crew coordinates movement,
+melee, rockets, cannon fire, and laser timing.
 
-**Modes:** Kaiju Brawl (waves + credits + upgrade shop) · Mech Duel (crew vs
-crew) · Training Course (learn the mech without being eaten)
+**Modes:** Classic Wave Mode (waves + safe between-wave upgrade shop) · Endless Escalation (danger clock + field supply beacons) · Mech Duel (crew vs crew) · Training Course (learn the mech without being eaten)
 
 ## Run it
 

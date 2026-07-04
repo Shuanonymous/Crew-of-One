@@ -17,6 +17,8 @@ const net = new Net();
 const input = new Input(net);
 const renderer = new Renderer($('game'));
 
+function isBrawlLike(mode = state.mode) { return mode === MODES.BRAWL || mode === MODES.CLASSIC; }
+
 const state = {
   screen: 'title',
   room: null,          // latest room msg
@@ -188,8 +190,8 @@ net.onGameStart = (msg) => {
   renderer.setPalette(0); // every run starts at golden hour
   show('game');
   updateRoleBanner();
-  $('wave-pill').classList.toggle('hidden', msg.mode !== MODES.BRAWL);
-  $('credits-pill').classList.toggle('hidden', msg.mode !== MODES.BRAWL);
+  $('wave-pill').classList.toggle('hidden', !isBrawlLike(msg.mode));
+  $('credits-pill').classList.toggle('hidden', !isBrawlLike(msg.mode));
   $('duel-hp-wrap').classList.toggle('hidden', msg.mode !== MODES.DUEL);
   $('objectives').classList.toggle('hidden', msg.mode !== MODES.TRAINING);
   $('laser-wrap').classList.add('hidden');
@@ -367,15 +369,15 @@ function updateHud(snap) {
     $('hp-fill').classList.toggle('low', frac < 0.3);
   }
 
-  if (state.mode === MODES.BRAWL) {
+  if (isBrawlLike()) {
     const mm = Math.floor(snap.runTime / 60), ss = String(Math.floor(snap.runTime % 60)).padStart(2, '0');
-    $('wave-pill').textContent = `⚠ DANGER ${snap.danger.toFixed(1)} · ${mm}:${ss}`;
+    $('wave-pill').textContent = state.mode === MODES.CLASSIC ? `WAVE ${snap.wave || 1} · ${snap.phase === PHASE.SHOP ? 'SHOP' : 'FIGHT'}` : `⚠ DANGER ${snap.danger.toFixed(1)} · ${mm}:${ss}`;
     if (snap.credits !== state.lastCredits) {
       state.lastCredits = snap.credits;
       $('credits-pill').textContent = '© ' + snap.credits;
       $('shop-credits').textContent = snap.credits;
     }
-    // proximity shop: open while standing at a beacon (danger doesn't pause)
+    // Classic: safe between-wave shop. Endless: proximity beacon shop.
     if (snap.shopOpen && state.screen === 'game') {
       show('shop');
       renderShopItems(snap);
@@ -405,7 +407,7 @@ function updateHud(snap) {
     $('boss-bar').classList.add('hidden');
   }
   if ((state.screen === 'game' || state.screen === 'shop') && snap.phase === PHASE.FIGHT) {
-    if (state.mode === MODES.BRAWL) music.setIntensity(Math.min(1, (snap.danger || 0) / 8), !!snap.bossBar);
+    if (isBrawlLike()) music.setIntensity(Math.min(1, (snap.danger || 0) / 8), !!snap.bossBar);
     else music.setState(snap.bossBar ? 'boss' : 'wave');
   }
 
@@ -453,7 +455,7 @@ function handlePhase(snap) {
 
 // --------------------------------------------------------------- shop
 function renderShopItems(snap) {
-  if (state.mode !== MODES.BRAWL) return;
+  if (!isBrawlLike()) return;
   const mine = myMech(snap || net.latest() || { mechs: [] });
   const wrap = $('shop-items');
   wrap.innerHTML = '';
@@ -471,7 +473,11 @@ function renderShopItems(snap) {
     btn.onclick = () => { sfx.click(); net.send({ t: 'buy', item: item.id }); };
     wrap.appendChild(btn);
   }
-  $('shop-hint').textContent = 'Walk away from the beacon to close. Monsters do not wait.';
+  $('shop-title').textContent = state.mode === MODES.CLASSIC ? '🛠 WAVE CLEARED — UPGRADE BAY' : '📡 SUPPLY BEACON';
+  $('shop-sub').textContent = state.mode === MODES.CLASSIC ? 'Safe shop: spend shared credits, then the host clicks READY for the next wave.' : 'Field shop: anyone can spend shared credits. Monsters do not wait.';
+  $('btn-shop-done').classList.toggle('hidden', !(state.mode === MODES.CLASSIC && state.isHost));
+  $('btn-shop-done').textContent = state.mode === MODES.CLASSIC ? 'READY FOR NEXT WAVE →' : 'NEXT WAVE →';
+  $('shop-hint').textContent = state.mode === MODES.CLASSIC ? 'Unaffordable upgrades are dimmed. Purchases apply immediately.' : 'Walk away from the beacon to close. Monsters do not wait.';
 }
 $('btn-shop-done').onclick = () => { sfx.click(); net.send({ t: 'shopDone' }); };
 
@@ -482,11 +488,16 @@ function showEnd(snap) {
   $('click-catch').classList.add('hidden');
   show('end');
   const stats = [];
-  if (state.mode === MODES.BRAWL) {
+  if (isBrawlLike()) {
     const mm = Math.floor((s.time || 0) / 60), ss = String((s.time || 0) % 60).padStart(2, '0');
     const bm = Math.floor((s.bestTime || 0) / 60), bs = String((s.bestTime || 0) % 60).padStart(2, '0');
-    $('end-title').textContent = 'HULL INTEGRITY ZERO — SECTOR ' + (s.seed || '?????');
-    $('end-big').textContent = (s.newBest ? '★ NEW RECORD — ' : '') + `SURVIVED ${mm}:${ss}`;
+    if (state.mode === MODES.CLASSIC) {
+      $('end-title').textContent = 'MECH DOWN — CLASSIC WAVE MODE';
+      $('end-big').textContent = `REACHED WAVE ${s.wave || 1}`;
+    } else {
+      $('end-title').textContent = 'HULL INTEGRITY ZERO — SECTOR ' + (s.seed || '?????');
+      $('end-big').textContent = (s.newBest ? '★ NEW RECORD — ' : '') + `SURVIVED ${mm}:${ss}`;
+    }
     stats.push([`${bm}:${bs}`, 'ROOM BEST'], [s.kills || 0, 'KAIJU DOWN'], [s.creditsEarned || 0, 'CREDITS EARNED'],
       [s.byPart?.ARMS || 0, 'DMG · ARMS'], [s.byPart?.LEGS || 0, 'DMG · LEGS'], [s.byPart?.HEAD || 0, 'DMG · HEAD']);
     if (s.byPart?.TURRET) stats.push([s.byPart.TURRET, 'DMG · TURRET']);
@@ -571,15 +582,35 @@ function applySettings() {
   renderer.setQuality?.(settings.quality);
   try { localStorage.setItem('coo-settings', JSON.stringify(settings)); } catch {}
 }
-$('btn-settings').onclick = () => { sfx.click(); $('screen-settings').classList.remove('hidden'); };
-$('btn-settings-close').onclick = () => { sfx.click(); $('screen-settings').classList.add('hidden'); applySettings(); };
+function openSettings() {
+  sfx.click();
+  $('screen-settings').classList.remove('hidden');
+  if (document.pointerLockElement) document.exitPointerLock?.();
+  const soloOrTraining = state.playing && (state.room?.players?.length === 1 || state.mode === MODES.TRAINING);
+  if (soloOrTraining) {
+    net.send({ t: MSG.PAUSE, paused: true });
+    $('settings-pause-note').textContent = 'Game paused for this solo/training session.';
+  } else if (state.playing) {
+    $('settings-pause-note').textContent = 'Multiplayer keeps running so one pilot cannot freeze everyone. Close this panel to resume controls.';
+  } else {
+    $('settings-pause-note').textContent = '';
+  }
+}
+function closeSettings() {
+  sfx.click();
+  $('screen-settings').classList.add('hidden');
+  applySettings();
+  net.send({ t: MSG.PAUSE, paused: false });
+}
+$('btn-settings').onclick = openSettings;
+$('btn-settings-close').onclick = closeSettings;
 $('set-master').oninput = (e) => { settings.master = +e.target.value; applySettings(); };
 $('set-music').oninput = (e) => { settings.music = +e.target.value; applySettings(); };
 $('set-shake').onchange = (e) => { settings.sfxShake = +e.target.value; applySettings(); };
 $('set-quality').onchange = (e) => { settings.quality = e.target.value; applySettings(); };
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Escape' && !document.pointerLockElement && state.playing) {
-    $('screen-settings').classList.toggle('hidden');
+    if ($('screen-settings').classList.contains('hidden')) openSettings(); else closeSettings();
   }
 });
 
@@ -644,7 +675,7 @@ function titleCity() {
   return defs;
 }
 
-// Debug/testing handle. It's a party game — "cheating" is just comedy.
+// Test harness handle for automated browser checks; not shown in the UI.
 window.__coo = { input, net, state, renderer };
 
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }

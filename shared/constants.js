@@ -169,7 +169,7 @@ export const BEACON_RADIUS = 9;   // stand this close to a supply beacon to shop
 // ---------------------------------------------------------------------------
 // Rooms, roles, modes, protocol
 // ---------------------------------------------------------------------------
-export const MODES = { BRAWL: 'brawl', DUEL: 'duel', TRAINING: 'training' };
+export const MODES = { CLASSIC: 'classic', ENDLESS: 'brawl', BRAWL: 'brawl', DUEL: 'duel', TRAINING: 'training' };
 
 export const ROLE = { LEGS: 'LEGS', ARM_L: 'ARM_L', ARM_R: 'ARM_R', HEAD: 'HEAD' };
 
@@ -198,7 +198,7 @@ export function roleTitle(roles) {
 export const MSG = {
   CREATE: 'create', JOIN: 'join', LEAVE: 'leave',
   SET_MODE: 'setMode', START: 'start', INPUT: 'input',
-  BUY: 'buy', SHOP_DONE: 'shopDone', AGAIN: 'again', TO_LOBBY: 'toLobby',
+  BUY: 'buy', SHOP_DONE: 'shopDone', PAUSE: 'pause', AGAIN: 'again', TO_LOBBY: 'toLobby',
   WELCOME: 'welcome', ROOM: 'room', GAME_START: 'gameStart',
   STATE: 'state', GAME_END: 'gameEnd', ERR: 'err',
 };

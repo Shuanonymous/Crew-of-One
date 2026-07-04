@@ -81,10 +81,13 @@ try {
   await wait(300);
   check('lowercase code accepted', c.room?.players.length === 3);
 
-  // 3. non-host cannot start; host starts brawl
+  // 3. non-host cannot start; default is Classic, then switch to Endless for movement sync stability
+  check('new rooms default to Classic Wave Mode', a.room?.mode === 'classic');
   b.send({ t: 'start' });
   await wait(300);
   check('non-host start ignored', !b.gameStart);
+  a.send({ t: 'setMode', mode: 'brawl' });
+  await wait(200);
   a.send({ t: 'start' });
   await wait(500);
   check('host start launches game for everyone', !!a.gameStart && !!b.gameStart && !!c.gameStart);
@@ -135,6 +138,30 @@ try {
   });
   check('disconnected player roles merged into a teammate', merged,
     JSON.stringify(survivors.map((cl) => cl.room.players.map((p) => p.roles))));
+
+  // 8. classic wave launches as the beginner default mode
+  const cw = new TestClient('Classic'); await cw.connect();
+  cw.send({ t: 'create', name: 'Classic' });
+  await wait(300);
+  cw.send({ t: 'start' });
+  await wait(500);
+  check('classic wave launches as default mode', cw.gameStart?.mode === 'classic' && cw.states.at(-1)?.wave === 1);
+  cw.send({ t: 'pause', paused: true });
+  await wait(250);
+  check('solo classic settings pause freezes room snapshot', cw.states.at(-1)?.paused === true);
+  cw.send({ t: 'pause', paused: false });
+  await wait(250);
+  check('solo classic settings resume unpauses room snapshot', cw.states.at(-1)?.paused === false);
+
+  // 8. endless escalation launches separately
+  const e0 = new TestClient('Endless'); await e0.connect();
+  e0.send({ t: 'create', name: 'Endless' });
+  await wait(300);
+  e0.send({ t: 'setMode', mode: 'brawl' });
+  await wait(200);
+  e0.send({ t: 'start' });
+  await wait(500);
+  check('endless escalation launches as separate mode', e0.gameStart?.mode === 'brawl' && typeof e0.states.at(-1)?.danger === 'number');
 
   // 8. duel requires 2+, assigns crews
   const d1 = new TestClient('D1'); await d1.connect();
