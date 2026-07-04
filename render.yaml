@@ -1,0 +1,11 @@
+# Render Blueprint — deploys the whole game as one free web service.
+# In Render: New + -> Blueprint -> pick this repo -> Apply. That's it.
+services:
+  - type: web
+    name: crew-of-one
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: node server/index.js
+    healthCheckPath: /healthz
+    autoDeploy: true

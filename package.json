@@ -1,11 +1,12 @@
 {
   "name": "crew-of-one",
   "version": "0.1.0",
-  "description": "A friendslop party game where a crew jointly pilots one wobbly giant robot.",
+  "description": "Cinematic co-op kaiju brawler: 2-8 friends jointly pilot one huge mech against original monsters.",
   "type": "module",
   "main": "server/index.js",
   "scripts": {
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "test": "node test/server-logic.test.js && node test/rooms.test.js"
   },
   "engines": {
     "node": ">=18"

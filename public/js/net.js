@@ -1,21 +1,22 @@
 import { MSG, INTERP_DELAY_MS } from '/shared/constants.js';
 
-// Connects to the server on the same address the page came from,
-// keeps a short buffer of world snapshots, and lets the renderer ask
-// "where was everything INTERP_DELAY_MS ago?" for smooth motion.
+// Connects to the server the page came from, buffers world snapshots,
+// and answers "where was everything INTERP_DELAY_MS ago?" for smooth
+// rendering between 20 Hz updates.
 
 export class Net {
   constructor() {
     this.ws = null;
     this.playerId = null;
-    this.role = null;
-    this.world = null;          // static world info from the welcome message
-    this.snapshots = [];        // recent state snapshots, oldest first
-    this.clockOffset = 0;       // serverTime - clientTime estimate
-    this.onWelcome = () => {};
-    this.onEvent = () => {};
-    this.onStatus = () => {};
+    this.snapshots = [];
+    this.clockOffset = 0;
     this.connected = false;
+    // callbacks the app installs
+    this.onRoom = () => {};
+    this.onGameStart = () => {};
+    this.onErr = () => {};
+    this.onStatus = () => {};
+    this.onSnapshot = () => {};
   }
 
   connect() {
@@ -23,13 +24,10 @@ export class Net {
     this.ws = new WebSocket(`${proto}://${location.host}`);
     this.onStatus('connecting…');
 
-    this.ws.onopen = () => {
-      this.connected = true;
-      this.onStatus('connected');
-    };
+    this.ws.onopen = () => { this.connected = true; this.onStatus(''); };
     this.ws.onclose = () => {
       this.connected = false;
-      this.onStatus('disconnected — retrying…');
+      this.onStatus('connection lost — reconnecting…');
       setTimeout(() => this.connect(), 1500);
     };
     this.ws.onerror = () => {};
@@ -37,31 +35,32 @@ export class Net {
     this.ws.onmessage = (e) => {
       let msg;
       try { msg = JSON.parse(e.data); } catch { return; }
-
-      if (msg.t === MSG.WELCOME) {
-        this.playerId = msg.playerId;
-        this.role = msg.role;
-        this.world = msg.world;
-        this.onWelcome(msg);
-      } else if (msg.t === MSG.STATE) {
-        this.clockOffset = msg.time - performance.now();
-        this.snapshots.push(msg);
-        if (this.snapshots.length > 40) this.snapshots.shift();
-        for (const r of msg.robots) {
-          for (const ev of r.ev || []) this.onEvent(ev, r);
-        }
+      switch (msg.t) {
+        case MSG.WELCOME: this.playerId = msg.playerId; break;
+        case MSG.ROOM: this.onRoom(msg); break;
+        case MSG.GAME_START:
+          this.snapshots = [];
+          this.onGameStart(msg);
+          break;
+        case MSG.STATE:
+          this.clockOffset = msg.time - performance.now();
+          this.snapshots.push(msg);
+          if (this.snapshots.length > 40) this.snapshots.shift();
+          this.onSnapshot(msg);
+          break;
+        case MSG.ERR: this.onErr(msg.msg); break;
+        case 'ping': this.onPing?.(msg); break;
       }
     };
   }
 
-  sendInput(data) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ t: MSG.INPUT, data }));
-    }
+  send(obj) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(obj));
   }
+  sendInput(data) { this.send({ t: MSG.INPUT, data }); }
 
-  // Returns { a, b, alpha }: the two snapshots around the render time and
-  // how far between them (0..1) we are. Null until enough data arrives.
+  latest() { return this.snapshots[this.snapshots.length - 1] || null; }
+
   sample() {
     if (this.snapshots.length < 2) return null;
     const renderTime = performance.now() + this.clockOffset - INTERP_DELAY_MS;
@@ -72,7 +71,6 @@ export class Net {
         return { a: s[i - 1], b: s[i], alpha: (renderTime - s[i - 1].time) / span };
       }
     }
-    // We're ahead of (or behind) the buffer — show the freshest state.
     return { a: s[s.length - 2], b: s[s.length - 1], alpha: 1 };
   }
 }
