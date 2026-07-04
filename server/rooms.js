@@ -258,12 +258,6 @@ export class Room {
 
   pause(id, paused) {
     if (!this.game) return;
-    const canPauseRoom = this.players.size === 1 || this.mode === MODES.TRAINING;
-    if (!canPauseRoom) {
-      const p = this.players.get(id);
-      if (p) send(p.ws, { t: MSG.ERR, msg: 'Settings are personal during multiplayer; step away or ask the host to wait.' });
-      return;
-    }
     this.game.paused = paused;
     this.game.pauseReason = paused ? 'settings' : null;
   }

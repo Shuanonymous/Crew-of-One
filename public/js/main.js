@@ -33,6 +33,7 @@ const state = {
   lastWave: 0,
   lastCredits: 0,
   shopOpen: false,
+  shopManual: false,
   endShown: false,
   lastHp: -1,
 };
@@ -192,6 +193,7 @@ net.onGameStart = (msg) => {
   updateRoleBanner();
   $('wave-pill').classList.toggle('hidden', !isBrawlLike(msg.mode));
   $('credits-pill').classList.toggle('hidden', !isBrawlLike(msg.mode));
+  $('btn-upgrades').classList.toggle('hidden', msg.mode !== MODES.BRAWL);
   $('duel-hp-wrap').classList.toggle('hidden', msg.mode !== MODES.DUEL);
   $('objectives').classList.toggle('hidden', msg.mode !== MODES.TRAINING);
   $('laser-wrap').classList.add('hidden');
@@ -377,13 +379,15 @@ function updateHud(snap) {
       $('credits-pill').textContent = '© ' + snap.credits;
       $('shop-credits').textContent = snap.credits;
     }
-    // Classic: safe between-wave shop. Endless: proximity beacon shop.
-    if (snap.shopOpen && state.screen === 'game') {
+    // Classic auto-opens between waves. Endless is buy-anywhere via the UPGRADES button or B.
+    const classicShop = state.mode === MODES.CLASSIC && snap.shopOpen;
+    const endlessShop = state.mode === MODES.BRAWL && state.shopManual;
+    if ((classicShop || endlessShop) && state.screen === 'game') {
       show('shop');
       renderShopItems(snap);
-    } else if (!snap.shopOpen && state.screen === 'shop') {
+    } else if (state.screen === 'shop' && !classicShop && !endlessShop) {
       show('game');
-    } else if (snap.shopOpen) {
+    } else if (state.screen === 'shop') {
       renderShopItems(snap);
     }
   }
@@ -473,13 +477,24 @@ function renderShopItems(snap) {
     btn.onclick = () => { sfx.click(); net.send({ t: 'buy', item: item.id }); };
     wrap.appendChild(btn);
   }
-  $('shop-title').textContent = state.mode === MODES.CLASSIC ? '🛠 WAVE CLEARED — UPGRADE BAY' : '📡 SUPPLY BEACON';
-  $('shop-sub').textContent = state.mode === MODES.CLASSIC ? 'Safe shop: spend shared credits, then the host clicks READY for the next wave.' : 'Field shop: anyone can spend shared credits. Monsters do not wait.';
-  $('btn-shop-done').classList.toggle('hidden', !(state.mode === MODES.CLASSIC && state.isHost));
-  $('btn-shop-done').textContent = state.mode === MODES.CLASSIC ? 'READY FOR NEXT WAVE →' : 'NEXT WAVE →';
-  $('shop-hint').textContent = state.mode === MODES.CLASSIC ? 'Unaffordable upgrades are dimmed. Purchases apply immediately.' : 'Walk away from the beacon to close. Monsters do not wait.';
+  $('shop-title').textContent = state.mode === MODES.CLASSIC ? '🛠 WAVE CLEARED — UPGRADE BAY' : '⚙ ENDLESS UPGRADES';
+  $('shop-sub').textContent = state.mode === MODES.CLASSIC ? 'Safe shop: spend shared credits, then the host clicks READY for the next wave.' : 'Endless shop: buy upgrades anywhere. The fight keeps moving behind this screen.';
+  $('btn-shop-done').classList.toggle('hidden', !(state.mode === MODES.CLASSIC && state.isHost) && state.mode !== MODES.BRAWL);
+  $('btn-shop-done').textContent = state.mode === MODES.CLASSIC ? 'READY FOR NEXT WAVE →' : 'BACK TO FIGHT';
+  $('shop-hint').textContent = state.mode === MODES.CLASSIC ? 'Unaffordable upgrades are dimmed. Purchases apply immediately.' : 'Press B or BACK TO FIGHT to close. Purchases apply immediately.';
 }
-$('btn-shop-done').onclick = () => { sfx.click(); net.send({ t: 'shopDone' }); };
+$('btn-shop-done').onclick = () => {
+  sfx.click();
+  if (state.mode === MODES.BRAWL) { state.shopManual = false; show('game'); return; }
+  net.send({ t: 'shopDone' });
+};
+$('btn-upgrades').onclick = () => {
+  if (state.mode !== MODES.BRAWL) return;
+  sfx.click();
+  state.shopManual = true;
+  show('shop');
+  renderShopItems(net.latest());
+};
 
 // ---------------------------------------------------------------- end
 function showEnd(snap) {
@@ -586,12 +601,9 @@ function openSettings() {
   sfx.click();
   $('screen-settings').classList.remove('hidden');
   if (document.pointerLockElement) document.exitPointerLock?.();
-  const soloOrTraining = state.playing && (state.room?.players?.length === 1 || state.mode === MODES.TRAINING);
-  if (soloOrTraining) {
+  if (state.playing) {
     net.send({ t: MSG.PAUSE, paused: true });
-    $('settings-pause-note').textContent = 'Game paused for this solo/training session.';
-  } else if (state.playing) {
-    $('settings-pause-note').textContent = 'Multiplayer keeps running so one pilot cannot freeze everyone. Close this panel to resume controls.';
+    $('settings-pause-note').textContent = 'Game paused. Close settings to resume the room.';
   } else {
     $('settings-pause-note').textContent = '';
   }

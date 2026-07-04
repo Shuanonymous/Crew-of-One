@@ -191,7 +191,6 @@ export class BrawlGame {
   }
 
   buy(itemId) {
-    if (!this.nearBeacon) return { ok: false, reason: 'no supply beacon in range' };
     const item = SHOP.find((s) => s.id === itemId);
     if (!item) return { ok: false, reason: 'unknown item' };
     const up = this.mech.upgrades;
@@ -352,7 +351,8 @@ export class BrawlGame {
       runTime: Math.round(this.time * 10) / 10,
       danger: Math.round(this.dangerLevel * 100) / 100,
       credits: this.credits,
-      shopOpen: !!this.nearBeacon,
+      shopOpen: true,
+      shopAvailable: true,
       beaconId: this.nearBeacon?.id || null,
       prices: Object.fromEntries(SHOP.map((it) => [it.id, this.priceOf(it)])),
       mechs: [this.mech.snapshot()],

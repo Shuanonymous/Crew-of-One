@@ -28,13 +28,13 @@
 
 ## How buying works
 - Classic buying is only accepted during the between-wave shop phase. Unaffordable buttons are disabled in the client. Purchases spend shared credits and immediately update mech upgrades/repair.
-- Endless buying remains supply-beacon gated. If the mech is not near a beacon, the server rejects the purchase.
+- Endless buying is available anywhere from the **UPGRADES (B)** HUD button; no supply beacon is required.
 - Regression coverage now checks that Classic repair and upgrades actually apply and that combat purchases are rejected.
 
 ## How settings work
 - Settings persist in `localStorage` for master volume, music volume, screen shake, and graphics quality.
 - Opening settings during solo play or Training asks the server to pause that room’s game loop until settings close.
-- Opening settings during multiplayer does not pause the whole room, preventing one player from freezing everyone; the UI explains this clearly.
+- Opening settings during an active run pauses the room loop until settings close.
 - The settings panel has a clear **RESUME / BACK** button.
 
 ## Tuning values
@@ -45,6 +45,14 @@
 - Camera shake budget remains capped in the renderer: each hit max 0.9 trauma, total max 1.2, multiplied by the user’s shake setting.
 
 
+
+## Hotfix after live-player feedback
+- **Endless Escalation buying is now buy-anywhere.** The server no longer requires a supply beacon for Endless purchases, and snapshots mark the Endless shop as always available.
+- Added an in-game **UPGRADES (B)** button for Endless. Players can click it or press **B**, buy upgrades, then click **BACK TO FIGHT**.
+- Settings now pause the authoritative room loop for active runs, including Endless, instead of only solo/training.
+- Added automated coverage for Endless buy-anywhere behavior and Endless settings pause/resume snapshots.
+- Classic remains the old-style wave format: fight wave → clear wave → safe shop → host ready → next wave.
+
 ## QA follow-up fixes before merge
 - Removed visible placeholder Ko-fi/Discord links from the title and end screens.
 - Removed the old direct comparison to a specific film franchise from project docs and kept the direction as original cinematic mech/kaiju action.
@@ -53,7 +61,6 @@
 - Added WebSocket pause regression coverage for solo Classic settings pause/resume snapshots.
 
 ## Known limitations
-- Multiplayer settings are personal and do not pause the whole fight. This is intentional for fairness, but the safest experience is to adjust settings before starting a multiplayer wave.
 - Classic mode reuses the existing city, mech, enemy, shop, effects, and combat systems; it is a stability-first rework rather than a total art rewrite.
 - Browser E2E was limited to server smoke testing in this environment; use the updated `PLAYTEST.md` checklist for a real 10-minute player pass.
 

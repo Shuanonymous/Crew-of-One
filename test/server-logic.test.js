@@ -44,15 +44,11 @@ function quietGame() { // endless game with the spawner muzzled
   for (const t of g.mechTargets) if (t.id === victim.id) t.takeHit(9999, null, 0, 'laser');
   check('kill pays credits', g.credits > c0, `${c0} -> ${g.credits}`);
 
-  // shop is beacon-gated
+  // endless shop is buy-anywhere (no beacon required)
   g.mech.body.position.set(500, 8, 500); // nowhere near a beacon
-  const far = g.buy('repair');
-  check('shop rejects when no beacon in range', !far.ok, far.reason);
-  const bc = g.inter.beacons[0];
-  g.mech.body.position.set(bc.p[0], 8, bc.p[2]);
   g.credits = 1000;
   const near = g.buy('dmg');
-  check('shop works at a beacon', near.ok && g.mech.upgrades.dmg === 1);
+  check('endless shop works anywhere', near.ok && g.mech.upgrades.dmg === 1);
   const p1 = g.priceOf({ id: 'dmg', price: 45, priceGrowth: 1.35 });
   check('repeatable tier price grows', p1 > 45, `next=${p1}`);
   g.buy('dash');
@@ -62,7 +58,7 @@ function quietGame() { // endless game with the spawner muzzled
 
   // snapshot shape
   const snap = g.snapshot();
-  check('snapshot has danger clock + shopOpen + prices', typeof snap.danger === 'number' && typeof snap.shopOpen === 'boolean' && snap.prices.dmg > 0);
+  check('snapshot has danger clock + always-available shop + prices', typeof snap.danger === 'number' && snap.shopOpen === true && snap.shopAvailable === true && snap.prices.dmg > 0);
 
   // death summary
   g.mech.invulnT = 0; g.mech.hp = 1;

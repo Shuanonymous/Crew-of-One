@@ -10,8 +10,8 @@ Use this first after the PR deploys. You do not need developer tools.
 4. **Hitbox fairness:** when monsters telegraph, try stepping away. Note any attack that feels invisible or unfair.
 5. **Clear a wave:** defeat all monsters and confirm the upgrade shop opens safely between waves.
 6. **Buying upgrades:** check credits/costs, buy a repair or upgrade, confirm credits go down and the upgrade feels applied. Unaffordable upgrades should look disabled.
-7. **Settings/pause:** open ⚙ during solo Classic or Training. Confirm the game pauses, volume sliders work, shake Off/Low/Normal works, graphics quality changes, and **RESUME / BACK** returns you to play.
-8. **Endless Escalation:** return to lobby, choose Endless, start it, find a supply beacon, and confirm the shop is field/beacon based.
+7. **Settings/pause:** open ⚙ during Classic, Endless, or Training. Confirm the game pauses, volume sliders work, shake Off/Low/Normal works, graphics quality changes, and **RESUME / BACK** returns you to play.
+8. **Endless Escalation:** return to lobby, choose Endless, start it, click **UPGRADES (B)** or press **B**, buy an upgrade anywhere, then click **BACK TO FIGHT**.
 9. **Mech Duel and Training:** launch each mode once. Duel should require 2+ players; Training should start solo and show objectives.
 10. **Comfort pass:** listen for painful repeated sounds, watch for camera shake chaos, and note any moment where the game still feels toy-like instead of cinematic.
 

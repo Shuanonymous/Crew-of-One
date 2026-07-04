@@ -162,6 +162,12 @@ try {
   e0.send({ t: 'start' });
   await wait(500);
   check('endless escalation launches as separate mode', e0.gameStart?.mode === 'brawl' && typeof e0.states.at(-1)?.danger === 'number');
+  e0.send({ t: 'pause', paused: true });
+  await wait(250);
+  check('endless settings pause freezes room snapshot', e0.states.at(-1)?.paused === true);
+  e0.send({ t: 'pause', paused: false });
+  await wait(250);
+  check('endless settings resume unpauses room snapshot', e0.states.at(-1)?.paused === false);
 
   // 8. duel requires 2+, assigns crews
   const d1 = new TestClient('D1'); await d1.connect();
