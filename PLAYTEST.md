@@ -33,8 +33,9 @@ same way.)
    The controls are written on the banner and on the click-to-start card.
 5. Play. Yell. Lose. Click **ONE MORE RUN** — roles shuffle every round.
 
-**Best first session:** run TRAINING once (teaches everyone their job in ~2
-minutes), then KAIJU BRAWL. Try MECH DUEL when you have 4+ people.
+**Best first session:** run TRAINING once, then ENDLESS DEFENSE. The run
+only ends when the mech dies — find the glowing cyan SUPPLY BEACONS to
+spend credits, use Q to ping targets, and beat the room's best time.
 
 ## 3. What everyone's job actually is
 

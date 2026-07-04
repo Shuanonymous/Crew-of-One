@@ -4,6 +4,66 @@
 
 ---
 
+# MAJOR REWORK (serious world / endless runs / bigger city)
+
+## 1. Tone
+Night-rain district, sweeping searchlights, horizon lightning flashes, red
+predator eye-slits on every monster (googly eyes gone), serious boss names
+(VORAX THE TIDE THAT WALKS, KHARYBDIS PRIME, THE SILENT COLOSSUS…). Humor
+lives only in UI copy and crew chaos.
+
+## 2. Endless structure (all values in shared/constants.js DANGER)
+- Danger clock: +1 level / 60 s. Monster hp/dmg scale with level via the
+  existing per-level fields; spawner budget = 4.5 + 0.5·level points/s.
+- Spawn costs: rusher 6 · crab 12 · swarm 4 · spitter 18 · flyer 20 ·
+  pigeon 26 · tank 45. Unlock levels 0/0/1/1/2/3/4. Caps: 26 monsters,
+  12 swarmlings. Bosses at danger levels 3, 6, 9, 12, 16, 20.
+- Credits: kills + 35% chance pickup drop (5–15©) + caches (15–30©).
+- SUPPLY BEACONS (5/run, radius 9 m): shop opens by proximity, fight does
+  not pause. Repeatable tiers (+20% melee dmg, +10% DR to 60%, +12% speed,
+  +25% laser & −10% charge; price ×1.35 per tier, repair ×1.2) + rare
+  finds: ROCKET FIST 120©, SHOULDER TURRET 140© (9 dmg/1.1 s, 38 m),
+  DASH THRUSTERS 130© (F key, impulse 1500, 3 s cd).
+- Run summary: time, seed, kills, credits, damage per part
+  (ARMS/LEGS/HEAD/TURRET), room best time (NEW RECORD banner).
+
+## 3. Music: danger maps continuously to stem gains (pad/arp/drums/bass),
+boss adds a detuned lead + double-time hats. All procedural, loops by design.
+
+## 4. Combat fixes
+- Laser: mech moves at 30% while charging/firing (roots removed).
+- Shake budget: ≤0.9 per hit, ≤1.2 total, ×0/0.5/1 user setting; swarm
+  chew damage (<3) triggers no shake. Sound instance caps: ≤3 (≤2 for
+  splat/hurt/screech/coo) per 160 ms window; crash/laser/fanfare uncapped.
+- Bosses at danger milestones with health bar + 3 telegraphed patterns.
+
+## 5. Procedural world (server/city.js)
+Seeded 340×340 m district (seed shown on summary): block grid with 18 m
+avenues, river strip, 2–3 landmark towers, 5 beacons, 10 explosive fuel
+tanks (45 AoE dmg to monsters in 14 m, 18 to mech in 12 m), 3 repair
+stations (5 hp/s inside 10 m; monsters within 9 m deal 6 dps to them),
+8 credit caches. Performance: 26-monster hard cap, fog-limited draw
+distance per quality tier (190/320/420), ember/particle pools, bloom off
+on Low. NOTE: this container renders via SwiftShader (software) so true
+60 fps can only be verified on real GPUs; entity caps + quality tiers are
+the enforced budget. If a playtest stutters, drop quality to Low first.
+
+## 6–8. Settings (volumes/shake/quality/keybinds, localStorage), crew
+pings (Q target / X danger, 6 s markers with distance), disconnect
+role-merge retested in endless, /admin?pass=… play counters (in-memory —
+resets on redeploy; swap to a disk/DB store if metrics matter later),
+Ko-fi + Discord placeholder links on title & summary (search
+YOUR_PAGE_HERE / YOUR_INVITE_HERE in public/index.html to fill in).
+
+## Steam/Electron porting notes
+Core game logic is all server-side Node (no browser APIs). Client uses
+browser APIs only in UI-layer files (localStorage in main.js settings,
+pointer lock in input.js, WebAudio in sfx/music) — all shimmable in
+Electron. Ship = wrap client in Electron + bundle the Node server as a
+child process or point at the hosted server.
+
+---
+
 # UPDATE PASS (feel / variety / atmosphere overhaul)
 
 All six requested sections shipped. Every tuning value is listed below for
