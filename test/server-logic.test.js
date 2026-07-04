@@ -1,6 +1,7 @@
 // Direct harness tests for the game logic (no network).
 // Run: node test/server-logic.test.js — exits nonzero on failure.
 import { BrawlGame } from '../server/brawl.js';
+import { ClassicWaveGame } from '../server/classic.js';
 import { DuelGame } from '../server/duel.js';
 import { TrainingGame } from '../server/training.js';
 import { Monster } from '../server/monsters.js';
@@ -43,15 +44,11 @@ function quietGame() { // endless game with the spawner muzzled
   for (const t of g.mechTargets) if (t.id === victim.id) t.takeHit(9999, null, 0, 'laser');
   check('kill pays credits', g.credits > c0, `${c0} -> ${g.credits}`);
 
-  // shop is beacon-gated
+  // endless shop is buy-anywhere (no beacon required)
   g.mech.body.position.set(500, 8, 500); // nowhere near a beacon
-  const far = g.buy('repair');
-  check('shop rejects when no beacon in range', !far.ok, far.reason);
-  const bc = g.inter.beacons[0];
-  g.mech.body.position.set(bc.p[0], 8, bc.p[2]);
   g.credits = 1000;
   const near = g.buy('dmg');
-  check('shop works at a beacon', near.ok && g.mech.upgrades.dmg === 1);
+  check('endless shop works anywhere', near.ok && g.mech.upgrades.dmg === 1);
   const p1 = g.priceOf({ id: 'dmg', price: 45, priceGrowth: 1.35 });
   check('repeatable tier price grows', p1 > 45, `next=${p1}`);
   g.buy('dash');
@@ -61,7 +58,7 @@ function quietGame() { // endless game with the spawner muzzled
 
   // snapshot shape
   const snap = g.snapshot();
-  check('snapshot has danger clock + shopOpen + prices', typeof snap.danger === 'number' && typeof snap.shopOpen === 'boolean' && snap.prices.dmg > 0);
+  check('snapshot has danger clock + always-available shop + prices', typeof snap.danger === 'number' && snap.shopOpen === true && snap.shopAvailable === true && snap.prices.dmg > 0);
 
   // death summary
   g.mech.invulnT = 0; g.mech.hp = 1;
@@ -71,6 +68,27 @@ function quietGame() { // endless game with the spawner muzzled
   const s = g.snapshot().summary;
   check('summary has time/seed/byPart/bestTime', s && s.seed === g.seed && s.byPart && s.bestTime >= 120,
     JSON.stringify({ time: s?.time, best: s?.bestTime, byPart: s?.byPart }));
+}
+
+
+// -------------------------------------------------------- CLASSIC WAVE SHOP
+{
+  const g = new ClassicWaveGame();
+  check('classic starts in wave fight', g.phase === PHASE.FIGHT && g.wave === 1 && g.monsters.length > 0, `phase=${g.phase} wave=${g.wave}`);
+  for (const m of [...g.monsters]) m.takeHit(9999, null, 0, 'laser');
+  stepFor(g, 0.2);
+  check('classic opens safe shop after wave clear', g.phase === PHASE.SHOP && g.snapshot().shopSafe === true, `phase=${g.phase}`);
+  g.credits = 1000;
+  const hp0 = g.mech.hp = 35;
+  const repair = g.buy('repair');
+  check('classic shop repair spends credits and heals', repair.ok && g.credits < 1000 && g.mech.hp > hp0, `credits=${g.credits} hp=${g.mech.hp}`);
+  const dmg = g.buy('dmg');
+  check('classic shop upgrade applies stat tier', dmg.ok && g.mech.upgrades.dmg === 1, `dmg=${g.mech.upgrades.dmg}`);
+  g.shopDone();
+  stepFor(g, 0.1);
+  check('classic ready starts next wave', g.phase === PHASE.FIGHT && g.wave === 2, `phase=${g.phase} wave=${g.wave}`);
+  const blocked = g.buy('speed');
+  check('classic rejects buying during combat', !blocked.ok && blocked.reason.includes('between waves'), blocked.reason);
 }
 
 // -------------------------------------------------------- MOVEMENT & FEEL

@@ -1,5 +1,5 @@
 // All sound is synthesized with WebAudio — no audio files, no loading,
-// and it fits the goofy-cartoon tone better than stock samples would.
+// and it keeps the soundtrack original, lightweight, and deploy-safe.
 
 class Sfx {
   constructor() {

@@ -1,7 +1,7 @@
 {
   "name": "crew-of-one",
   "version": "0.1.0",
-  "description": "Co-op kaiju brawler: 2-8 friends jointly pilot ONE huge mech against goofy monsters.",
+  "description": "Cinematic co-op kaiju brawler: 2-8 friends jointly pilot one huge mech against original monsters.",
   "type": "module",
   "main": "server/index.js",
   "scripts": {
