@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MECH } from '/shared/constants.js';
 
 // Everything visual. Style goals: stylized-cinematic — chunky low-poly
@@ -71,8 +72,7 @@ export class Renderer {
     this.scene.add(this.sunDisc);
 
     // silhouetted skyline rings — the city goes on forever
-    this.silhouettes = new THREE.Group();
-    const silMat = new THREE.MeshBasicMaterial({ color: '#241f42', fog: false });
+    const silGeos = [];
     const rng0 = mulberry32(3);
     for (let ring = 0; ring < 2; ring++) {
       const r = 200 + ring * 90;
@@ -80,32 +80,44 @@ export class Renderer {
         const a = (i / 42) * Math.PI * 2 + ring * 0.07;
         const h = 25 + rng0() * (55 + ring * 40);
         const w = 18 + rng0() * 26;
-        const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), silMat);
-        b.position.set(Math.cos(a) * r, h / 2 - 4, Math.sin(a) * r);
-        this.silhouettes.add(b);
+        const gBox = new THREE.BoxGeometry(w, h, w);
+        gBox.translate(Math.cos(a) * r, h / 2 - 4, Math.sin(a) * r);
+        silGeos.push(gBox);
       }
     }
+    this.silhouettes = new THREE.Mesh(mergeGeometries(silGeos),
+      new THREE.MeshBasicMaterial({ color: '#241f42', fog: false }));
+    this.silhouettes.frustumCulled = false;
     this.scene.add(this.silhouettes);
 
-    // drifting embers / dust motes
-    this.embers = [];
-    const emberMat = new THREE.MeshBasicMaterial({ color: '#ffcf8a', transparent: true, opacity: 0.75 });
-    for (let i = 0; i < 70; i++) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.28), emberMat);
-      m.position.set((Math.random() - 0.5) * 130, Math.random() * 30 + 1, (Math.random() - 0.5) * 130);
-      this.scene.add(m);
-      this.embers.push({ m, vy: 0.4 + Math.random() * 0.8, ph: Math.random() * 9 });
+    // drifting embers / dust motes: one Points cloud
+    const emberN = 70;
+    this.emberPos = new Float32Array(emberN * 3);
+    for (let i = 0; i < emberN; i++) {
+      this.emberPos[i * 3] = (Math.random() - 0.5) * 130;
+      this.emberPos[i * 3 + 1] = Math.random() * 30 + 1;
+      this.emberPos[i * 3 + 2] = (Math.random() - 0.5) * 130;
     }
+    const emberGeo = new THREE.BufferGeometry();
+    emberGeo.setAttribute('position', new THREE.BufferAttribute(this.emberPos, 3));
+    this.emberPts = new THREE.Points(emberGeo, new THREE.PointsMaterial({ color: '#ffcf8a', size: 0.5, transparent: true, opacity: 0.6 }));
+    this.emberPts.frustumCulled = false;
+    this.scene.add(this.emberPts);
+    this.embers = []; // legacy handle for setQuality
 
-    // RAIN: a pool of thin streaks that fall around the camera
-    this.rain = [];
-    const rainMat = new THREE.MeshBasicMaterial({ color: '#8fa3cc', transparent: true, opacity: 0.5 });
-    for (let i = 0; i < 260; i++) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 2.6), rainMat);
-      m.position.set((Math.random() - 0.5) * 140, Math.random() * 60, (Math.random() - 0.5) * 140);
-      this.scene.add(m);
-      this.rain.push(m);
+    // RAIN: one Points cloud (1 draw call), positions updated per frame
+    const rainN = 600;
+    this.rainPos = new Float32Array(rainN * 3);
+    for (let i = 0; i < rainN; i++) {
+      this.rainPos[i * 3] = (Math.random() - 0.5) * 150;
+      this.rainPos[i * 3 + 1] = Math.random() * 60;
+      this.rainPos[i * 3 + 2] = (Math.random() - 0.5) * 150;
     }
+    const rainGeo = new THREE.BufferGeometry();
+    rainGeo.setAttribute('position', new THREE.BufferAttribute(this.rainPos, 3));
+    this.rainPts = new THREE.Points(rainGeo, new THREE.PointsMaterial({ color: '#8fa3cc', size: 0.5, transparent: true, opacity: 0.55, sizeAttenuation: true }));
+    this.rainPts.frustumCulled = false;
+    this.scene.add(this.rainPts);
     // SEARCHLIGHTS: sweeping cones over the district
     this.searchlights = [];
     for (let i = 0; i < 3; i++) {
@@ -162,7 +174,8 @@ export class Renderer {
     this.sun.castShadow = opts.shadows;
     if (this.bloom) this.bloom.strength = opts.bloom;
     this.scene.fog.far = opts.fog;
-    this.embers.forEach((e, i) => { e.m.visible = i < opts.embers; });
+    this.emberPts.visible = opts.embers > 0;
+    this.rainPts.material.size = opts.pr < 1 ? 0.7 : 0.5;
     this.resize();
   }
 
@@ -231,14 +244,17 @@ export class Renderer {
       this.applyPalette(this.currentPalette());
     }
     const t = performance.now() / 1000;
-    // rain falls around the camera
-    for (const r of this.rain) {
-      r.position.y -= dt * 46;
-      if (r.position.y < 0) {
-        r.position.set(this.camPos.x + (Math.random() - 0.5) * 140, 55 + Math.random() * 10, this.camPos.z + (Math.random() - 0.5) * 140);
+    // rain falls around the camera (single buffer update)
+    const rp = this.rainPos;
+    for (let i = 0; i < rp.length; i += 3) {
+      rp[i + 1] -= dt * 46;
+      if (rp[i + 1] < 0) {
+        rp[i] = this.camPos.x + (Math.random() - 0.5) * 150;
+        rp[i + 1] = 55 + Math.random() * 10;
+        rp[i + 2] = this.camPos.z + (Math.random() - 0.5) * 150;
       }
-      r.quaternion.copy(this.camera.quaternion);
     }
+    this.rainPts.geometry.attributes.position.needsUpdate = true;
     // searchlights sweep slowly
     for (const s of this.searchlights) {
       s.cone.rotation.z = Math.sin(t * 0.21 + s.ph) * 0.5;
@@ -254,13 +270,13 @@ export class Renderer {
       this.flash = Math.max(0, this.flash - dt * 3.5);
       this.hemi.intensity = (this.palB.amb ?? 0.6) + this.flash * 1.6;
     }
-    for (const e of this.embers) {
-      e.m.position.y += e.vy * dt;
-      e.m.position.x += Math.sin(t * 0.6 + e.ph) * dt * 0.8;
-      if (e.m.position.y > 32) e.m.position.y = 0.5;
-      e.m.quaternion.copy(this.camera.quaternion);
-      e.m.material.opacity = 0.4 + 0.35 * Math.sin(t * 2 + e.ph);
+    const ep = this.emberPos;
+    for (let i = 0; i < ep.length; i += 3) {
+      ep[i + 1] += dt * 0.7;
+      if (ep[i + 1] > 32) ep[i + 1] = 0.5;
     }
+    this.emberPts.geometry.attributes.position.needsUpdate = true;
+    this.emberPts.material.opacity = 0.35 + 0.25 * Math.sin(t * 2);
   }
 
   // ------------------------------------------------------- effect spawns
@@ -317,15 +333,19 @@ export class Renderer {
   // ------------------------------------------------------------ world
   clearWorld() {
     this.scene.remove(this.worldGroup);
-    // RAIN: a pool of thin streaks that fall around the camera
-    this.rain = [];
-    const rainMat = new THREE.MeshBasicMaterial({ color: '#8fa3cc', transparent: true, opacity: 0.5 });
-    for (let i = 0; i < 260; i++) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 2.6), rainMat);
-      m.position.set((Math.random() - 0.5) * 140, Math.random() * 60, (Math.random() - 0.5) * 140);
-      this.scene.add(m);
-      this.rain.push(m);
+    // RAIN: one Points cloud (1 draw call), positions updated per frame
+    const rainN = 600;
+    this.rainPos = new Float32Array(rainN * 3);
+    for (let i = 0; i < rainN; i++) {
+      this.rainPos[i * 3] = (Math.random() - 0.5) * 150;
+      this.rainPos[i * 3 + 1] = Math.random() * 60;
+      this.rainPos[i * 3 + 2] = (Math.random() - 0.5) * 150;
     }
+    const rainGeo = new THREE.BufferGeometry();
+    rainGeo.setAttribute('position', new THREE.BufferAttribute(this.rainPos, 3));
+    this.rainPts = new THREE.Points(rainGeo, new THREE.PointsMaterial({ color: '#8fa3cc', size: 0.5, transparent: true, opacity: 0.55, sizeAttenuation: true }));
+    this.rainPts.frustumCulled = false;
+    this.scene.add(this.rainPts);
     // SEARCHLIGHTS: sweeping cones over the district
     this.searchlights = [];
     for (let i = 0; i < 3; i++) {
@@ -356,6 +376,7 @@ export class Renderer {
   buildWorld(world) {
     this.clearWorld();
     const g = this.worldGroup;
+    this.batches = { body: {}, roof: {} }; // color -> geometry list
 
     for (const d of world.city) {
       if (d.kind === 'ground') {
@@ -394,22 +415,28 @@ export class Renderer {
         cap.position.set(d.p[0], d.p[1] + d.size[1] / 2 + 2, d.p[2]);
         g.add(cap);
       } else if (d.kind === 'building') {
-        const mat = new THREE.MeshLambertMaterial({ color: d.color, map: d.windows ? this.windowTex : null });
-        const mesh = new THREE.Mesh(new THREE.BoxGeometry(...d.size), mat);
-        mesh.position.set(...d.p);
-        mesh.rotation.y = d.yaw || 0;
-        mesh.castShadow = mesh.receiveShadow = true;
-        g.add(mesh);
-        // flat roof slab, slightly darker — sells the chunky look
-        const roof = new THREE.Mesh(
-          new THREE.BoxGeometry(d.size[0] + 0.7, 0.8, d.size[2] + 0.7),
-          new THREE.MeshLambertMaterial({ color: shade(d.color, 0.72) })
-        );
-        roof.position.set(d.p[0], d.p[1] + d.size[1] / 2 + 0.4, d.p[2]);
-        roof.rotation.y = d.yaw || 0;
-        g.add(roof);
+        // batch: one merged mesh per color = a handful of draw calls total
+        const box = new THREE.BoxGeometry(...d.size);
+        if (d.yaw) box.rotateY(d.yaw);
+        box.translate(...d.p);
+        (this.batches.body[d.color] = this.batches.body[d.color] || []).push(box);
+        const roof = new THREE.BoxGeometry(d.size[0] + 0.7, 0.8, d.size[2] + 0.7);
+        if (d.yaw) roof.rotateY(d.yaw);
+        roof.translate(d.p[0], d.p[1] + d.size[1] / 2 + 0.4, d.p[2]);
+        (this.batches.roof[d.color] = this.batches.roof[d.color] || []).push(roof);
         this.decorateBuilding(g, d);
       }
+    }
+    for (const [color, geos] of Object.entries(this.batches.body)) {
+      const mesh = new THREE.Mesh(mergeGeometries(geos),
+        new THREE.MeshLambertMaterial({ color, map: this.windowTex }));
+      mesh.castShadow = mesh.receiveShadow = true;
+      g.add(mesh);
+    }
+    for (const [color, geos] of Object.entries(this.batches.roof)) {
+      const mesh = new THREE.Mesh(mergeGeometries(geos),
+        new THREE.MeshLambertMaterial({ color: shade(color, 0.72) }));
+      g.add(mesh);
     }
 
     // endless-run interactables
@@ -550,12 +577,12 @@ export class Renderer {
       }
       tw.position.set(d.p[0], topY, d.p[2]);
       g.add(tw);
-    } else if (h % 5 === 1) {
+    } else if (false) {
       const ac = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.3, 2.2),
         new THREE.MeshLambertMaterial({ color: shade(d.color, 0.5) }));
       ac.position.set(d.p[0] + 1, topY + 0.65, d.p[2] - 1);
       g.add(ac);
-    } else if (h % 5 === 2) {
+    } else if (false) {
       const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.14, 5),
         new THREE.MeshLambertMaterial({ color: '#2b2d42' }));
       ant.position.set(d.p[0], topY + 2.5, d.p[2]);
