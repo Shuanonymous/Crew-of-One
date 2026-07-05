@@ -601,13 +601,15 @@ function drawPings() {
 }
 
 // ---------------------------------------------------------- settings
-const settings = { master: 0.5, music: 0.32, sfxShake: 1, quality: 'medium' };
+const settings = { master: 0.5, music: 0.32, sfx: 1, sfxShake: 1, quality: 'medium', sens: 1 };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('coo-settings') || '{}')); } catch {}
 function applySettings() {
   if (sfx.master) sfx.master.gain.value = settings.master;
   if (music.bus) music.bus.gain.value = settings.music;
   renderer.shakeMult = settings.sfxShake;
   renderer.setQuality?.(settings.quality);
+  input.sensitivity = settings.sens;
+  if (sfx.sfxGain) sfx.sfxGain.gain.value = settings.sfx;
   try { localStorage.setItem('coo-settings', JSON.stringify(settings)); } catch {}
 }
 function openSettings() {
@@ -633,6 +635,8 @@ $('set-master').oninput = (e) => { settings.master = +e.target.value; applySetti
 $('set-music').oninput = (e) => { settings.music = +e.target.value; applySettings(); };
 $('set-shake').onchange = (e) => { settings.sfxShake = +e.target.value; applySettings(); };
 $('set-quality').onchange = (e) => { settings.quality = e.target.value; applySettings(); };
+if ($('set-sens')) $('set-sens').oninput = (e) => { settings.sens = +e.target.value; applySettings(); };
+if ($('set-sfxvol')) $('set-sfxvol').oninput = (e) => { settings.sfx = +e.target.value; applySettings(); };
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Escape' && !document.pointerLockElement && state.playing) {
     if ($('screen-settings').classList.contains('hidden')) openSettings(); else closeSettings();
@@ -666,6 +670,12 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+// reflect persisted settings into the sliders
+if ($('set-master')) $('set-master').value = settings.master;
+if ($('set-music')) $('set-music').value = settings.music;
+if ($('set-sens')) $('set-sens').value = settings.sens;
+if ($('set-sfxvol')) $('set-sfxvol').value = settings.sfx;
+if ($('set-quality')) $('set-quality').value = settings.quality;
 applySettings();
 
 // A little city to look at behind the title screen

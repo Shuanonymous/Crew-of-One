@@ -28,10 +28,16 @@ class Music {
     this.bus = ctx.createGain();
     this.bus.gain.value = 0.32;
     this.bus.connect(master);
+    // a distortion curve gives the lead a snarling guitar/synth-hybrid edge
+    const shaper = ctx.createWaveShaper();
+    const curve = new Float32Array(1024);
+    for (let i = 0; i < 1024; i++) { const x = (i / 512) - 1; curve[i] = Math.tanh(x * 4); }
+    shaper.curve = curve;
+    shaper.connect(this.bus);
     for (const name of ['pad', 'arp', 'drums', 'bass', 'lead']) {
       const g = ctx.createGain();
       g.gain.value = 0;
-      g.connect(this.bus);
+      g.connect(name === 'lead' ? shaper : this.bus);
       this.layers[name] = g;
     }
     this.nextT = ctx.currentTime + 0.1;

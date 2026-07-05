@@ -152,6 +152,19 @@ export class Renderer {
     this.applyPalette(this.palA, this.palA, 1);
 
     // bloom pipeline: only genuinely bright things glow
+    // procedural environment map so PBR metal reflects the night sky/city glow
+    try {
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      const envScene = new THREE.Scene();
+      envScene.background = new THREE.Color('#141833');
+      const glow = new THREE.Mesh(new THREE.SphereGeometry(50, 8, 8),
+        new THREE.MeshBasicMaterial({ color: '#3a4a7a', side: THREE.BackSide }));
+      envScene.add(glow);
+      const neon = new THREE.PointLight('#4dfff0', 40, 200); neon.position.set(20, 10, 20); envScene.add(neon);
+      const neon2 = new THREE.PointLight('#ff5da2', 40, 200); neon2.position.set(-25, 8, -15); envScene.add(neon2);
+      this.scene.environment = pmrem.fromScene(envScene).texture;
+    } catch (e) { /* PMREM unsupported: metal falls back to lit-only */ }
+
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.55, 0.5, 0.82);
@@ -821,9 +834,10 @@ class MechView {
     this.root = new THREE.Group();
     scene.add(this.root);
 
-    const main = new THREE.MeshLambertMaterial({ color });
-    const dark = new THREE.MeshLambertMaterial({ color: '#2b2d42' });
-    const trim = new THREE.MeshLambertMaterial({ color: '#fdf6ec' });
+    // PBR brushed-metal armour with worn edges + emissive cockpit strips
+    const main = new THREE.MeshStandardMaterial({ color, metalness: 0.85, roughness: 0.45 });
+    const dark = new THREE.MeshStandardMaterial({ color: '#2b2d42', metalness: 0.9, roughness: 0.35 });
+    const trim = new THREE.MeshStandardMaterial({ color: '#0a0d18', metalness: 0.7, roughness: 0.3, emissive: new THREE.Color('#2ad4ff'), emissiveIntensity: 1.4 });
     this.mats = { main, dark, trim };
 
     // torso

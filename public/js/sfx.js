@@ -16,6 +16,9 @@ class Sfx {
     this.ctx = new AC();
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.5;
+    this.sfxGain = this.ctx.createGain();
+    this.sfxGain.gain.value = 1;
+    this.sfxGain.connect(this.master);
     this.master.connect(this.ctx.destination);
   }
 
@@ -27,7 +30,7 @@ class Sfx {
     g.gain.exponentialRampToValueAtTime(peak, t0 + attack);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + attack + decay);
     node.connect(g);
-    g.connect(this.master);
+    g.connect(this.sfxGain || this.master);
     return g;
   }
 
