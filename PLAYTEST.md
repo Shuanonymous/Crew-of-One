@@ -1,120 +1,80 @@
-# Crew of One — Playtest Guide
+# Crew of One — Playtest Guide (15-minute checklist)
 
-# 10-minute Codex Rework Checklist
+**Live:** https://crew-of-one.onrender.com — send that link to friends.
 
-Use this first after the PR deploys. You do not need developer tools.
+Plain language. This walks you through all four modes in ~15 minutes.
+The free server naps when idle; the first visitor waits ~30–60 s while it
+wakes.
 
-1. **Create a room:** open the live link, enter a name, click **CREATE ROOM**.
-2. **Classic Wave Mode:** leave the default mode selected, click **START**, and confirm the HUD says **WAVE 1**.
-3. **Combat feel:** walk, punch, kick/stomp, use the laser, and check that attacks feel heavy but responsive.
-4. **Hitbox fairness:** when monsters telegraph, try stepping away. Note any attack that feels invisible or unfair.
-5. **Clear a wave:** defeat all monsters and confirm the upgrade shop opens safely between waves.
-6. **Buying upgrades:** check credits/costs, buy a repair or upgrade, confirm credits go down and the upgrade feels applied. Unaffordable upgrades should look disabled.
-7. **Settings/pause:** open ⚙ during Classic, Endless, or Training. Confirm the game pauses, volume sliders work, shake Off/Low/Normal works, graphics quality changes, and **RESUME / BACK** returns you to play.
-8. **Endless Escalation:** return to lobby, choose Endless, start it, click **UPGRADES (B)** or press **B**, buy an upgrade anywhere, then click **BACK TO FIGHT**.
-9. **Mech Duel and Training:** launch each mode once. Duel should require 2+ players; Training should start solo and show objectives.
-10. **Comfort pass:** listen for painful repeated sounds, watch for camera shake chaos, and note any moment where the game still feels toy-like instead of cinematic.
+## Setup (1 min)
+1. Open the link, type a pilot name, click **CREATE ROOM**.
+2. Click **COPY INVITE LINK**, paste it to your crew (or they type the
+   4-letter code). You can also solo-test: one person can pilot the whole
+   mech.
+3. The host picks a mode and clicks **START**. Everyone gets a giant
+   "YOU ARE THE …" banner with their controls.
 
-Feedback to collect from friends:
-- Was Classic clear without explanation?
-- Did buying upgrades make sense?
-- Did any role feel useless or overloaded?
-- Were monster attacks readable and fair?
-- Did camera shake/audio ever become uncomfortable?
-- Which mode should become the main public default long-term?
+## Controls recap
+- **LEGS:** WASD move, SPACE kick, F dash (if bought).
+- **ARMS:** mouse aim, L/R click punch (J/K backup), hold right-click / C
+  spins the rotary cannon (if bought).
+- **HEAD:** mouse aims the mech's face + eye laser (hold click / E),
+  tap R to fire rocket pods (if bought).
+- **Anyone:** Q pings a target, X pings danger, B opens upgrades
+  (Endless), Esc or the ⚙ gear opens settings (pauses the run).
 
----
+## 1) TRAINING (2 min) — learn the mech
+Pick **TRAINING**, START. Walk the three rings (LEGS), punch the two
+dummies (ARMS), kick over the crate tower, pop the balloon with the laser
+(HEAD). Good for teaching everyone their job with nothing biting back.
 
+## 2) CLASSIC WAVE MODE (4 min) — the friendly fight
+Back to lobby (host: BACK TO LOBBY on the summary, or LEAVE + recreate),
+pick **CLASSIC WAVE MODE**, START.
+- Fight the wave. When it clears, the **safe shop** opens automatically.
+- **Click an upgrade** — credits drop and the stat applies immediately
+  (watch the credit counter pulse). Buy a repair and some FIST SERVOS.
+- Host clicks **READY FOR NEXT WAVE**. Repeat. This is the relaxed mode.
 
-Plain language, no jargon. This is everything you need to put the game in
-front of friends.
+## 3) ENDLESS ESCALATION (4 min) — the pressure cooker
+Lobby → **ENDLESS ESCALATION** → START.
+- The **danger clock** (top-left) never stops rising. There are **no
+  supply beacons** — press **B** or click **UPGRADES** anytime to open the
+  shop as an overlay **while the fight continues behind it**. Buying under
+  pressure is the point.
+- Try the ranged rares if you can afford them: **ROTARY CANNON** (hold
+  right-click to spin up, then tracer-hose a pack) and **ROCKET PODS**
+  (tap R for homing missiles).
+- Use the world: punch/laser an orange **fuel tank** near a crowd for a
+  big AoE; stand in a green **repair station** to heal (monsters wreck
+  them); smash **credit caches**.
+- Named bosses arrive at danger milestones with a health bar. When the
+  mech dies, the **run summary** shows time survived, the map seed, and
+  per-pilot damage. Beat the room's best time.
 
-## 1. The game is LIVE
+## 4) MECH DUEL (2 min) — crew vs crew
+Needs 2+ players. Lobby → **MECH DUEL** → START. Two crews, two mechs,
+one plaza, same weapons. Last mech standing wins.
 
-**https://crew-of-one.onrender.com** — send that link to anyone.
+## 5) Settings + pause (1 min) — test the co-op pause
+Mid-run, one player presses **Esc** (or the ⚙ gear). The whole room
+freezes with a **"PAUSED BY <name>"** banner. Adjust master/music/SFX
+volume, camera sensitivity, screen shake, or graphics quality (drop to
+**Low** if anything stutters). Close settings — the room resumes for
+everyone. Anyone can resume, not just the host.
 
-It runs on Render's free tier under your account, deployed from this
-repository's `claude/crew-of-one-game-uv7dmi` branch. Every push to that
-branch redeploys automatically.
+## What to look for / report back
+- Does clicking an upgrade always register and deduct credits? (This was
+  the big bug — it's now covered by an automated browser test.)
+- Does the mech feel weighty but responsive?
+- Are the ranged weapons worth their price?
+- Frame rate: if it stutters on a weak laptop, Settings → Graphics → Low.
+- Anything that reads as "toy/goofy" rather than "cinematic mech film"?
+  (The art is an ongoing cinematic pass — see PROGRESS.md "next
+  milestones" for what's still coming: districts, minimap, texture-mapped
+  PBR, motion blur.)
 
-Notes about the free tier:
-- After ~15 minutes with nobody playing, the server naps. The first person to
-  open the link waits ~30–60 seconds while it wakes up. Fine for game nights.
-- It comfortably handles a few dozen simultaneous players (several rooms).
-- Every time this repository's main branch is updated, Render redeploys
-  automatically.
-
-(Want to move hosts later? The repo also contains `railway.json`, `fly.toml`
-and a `Dockerfile` — connect the repo on either platform and it deploys the
-same way.)
-
-## 2. How a game night works
-
-1. One person opens **https://crew-of-one.onrender.com**, types a name,
-   clicks **CREATE ROOM**.
-2. They click **COPY INVITE LINK** and paste it in the group chat
-   (or friends type the 4-letter code on the title screen).
-3. Everyone appears in the lobby. The host picks a mode and hits **START**.
-4. Each player gets a giant banner: **YOU ARE THE LEGS** (or arms, or head).
-   The controls are written on the banner and on the click-to-start card.
-5. Play. Yell. Lose. Click **ONE MORE RUN** — roles shuffle every round.
-
-**Best first session:** run TRAINING once, then ENDLESS DEFENSE. The run
-only ends when the mech dies — find the glowing cyan SUPPLY BEACONS to
-spend credits, use Q to ping targets, and beat the room's best time.
-
-## 3. What everyone's job actually is
-
-- **THE LEGS** — WASD walks (relative to *your* camera), SPACE kicks. The kick
-  is huge but you're on one leg — mid-kick the mech balances like a shopping
-  cart. Don't kick while the head is charging the laser. You will anyway.
-- **THE ARMS** — mouse aims, left/right click = left/right fist (J/K also
-  work). Punches wind up for half a second, so swing *before* the crab is in
-  your face. Punches go where YOUR camera looks — but the body faces where the
-  HEAD looks, so talk to each other.
-- **THE HEAD** — you steer the mech's facing with your mouse and you own the
-  eye laser: hold the button, the whole mech stops for 3 seconds, then ZAP.
-  Charging at the wrong moment is the single funniest thing in the game.
-
-## 4. Know your enemy (new roster)
-
-- **SCUTTLERS** — fast little packs. If your crew is slow, they will humble you.
-- **LOOGIE LOUIE** — lobs glowing globs from across the plaza and waddles away
-  if you approach. Sidestep the glob (it aims where you WERE), then laser him.
-- **SIR CLANKSALOT** — armored tank. Punches bounce off (25% damage). This is
-  what the laser is for.
-- **DIVE-BOMB DAVE** — circles overhead, screeches, then dives at where you're
-  standing. Move. Or punch him out of the air mid-dive if you're brave.
-- **GRABLINS** — dozens of tiny gremlins that climb the mech and chew.
-  The LEGS player kicks to shake them ALL off at once.
-- **BOSSES every 5th wave** — named, huge, health bar across the top.
-  Watch for the long slam telegraph and get OUT of the ring.
-
-The sky changes as you survive: sunset → dusk → neon night → dawn.
-
-## 5. Things to try (comedy checklist)
-
-- Kick a car into a crab.
-- Kick a SCUTTLER mid-sprint and watch it clear a building.
-- Buy ROCKET PUNCH and miss on purpose — the fist launches like a missile.
-- Get hit by PIGEONZILLA's wing gust while charging the laser.
-- Sweep the fully-charged laser across an entire scuttler pack.
-- Two players sharing the legs in a 5+ crew: WASD tug-of-war.
-- In the shop, let the person who never fights spend all the credits.
-
-## 6. Known quirks (all intentional or acceptable for v1)
-
-- Desktop keyboard + mouse only. Phones/tablets show the page but can't play.
-- The free server naps when idle — first visitor wakes it (30–60 s).
-- The camera can clip through buildings if you press it against a wall.
-- Monsters occasionally shove each other around while pathing — they're crabs,
-  they don't queue nicely.
-- If everyone leaves a room, it evaporates (nothing is saved — by design,
-  every run is self-contained).
-
-## 7. If something breaks
-
-- Refresh the page — you'll land on the title screen; rejoin with the room code.
-- If the room is gone, make a new one (30 seconds).
-- Server-side surgery: the game restarts cleanly on redeploy (Render:
-  "Manual Deploy" button).
+## If something breaks
+Refresh the page (you land on the title screen; rejoin with the room
+code). If the room is gone, make a new one. Support/Discord links are on
+the title screen (placeholder URLs to fill in).
