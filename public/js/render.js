@@ -643,6 +643,24 @@ export class Renderer {
       mesh.quaternion.copy(qa.slerp(qb, alpha));
     }
 
+    // mech tracers + missiles (ranged weapons) — pooled scene meshes
+    this._weaponPool = this._weaponPool || { tracers: [], missiles: [] };
+    let ti = 0, mi = 0;
+    for (const mb of b.mechs) {
+      for (const tr of mb.tracers || []) {
+        let mesh = this._weaponPool.tracers[ti];
+        if (!mesh) { mesh = new THREE.Mesh(new THREE.SphereGeometry(0.35, 6, 6), new THREE.MeshBasicMaterial({ color: '#ffd98a' })); this.scene.add(mesh); this._weaponPool.tracers[ti] = mesh; }
+        mesh.visible = true; mesh.position.set(tr.p[0], tr.p[1], tr.p[2]); ti++;
+      }
+      for (const ms of mb.missiles || []) {
+        let mesh = this._weaponPool.missiles[mi];
+        if (!mesh) { mesh = new THREE.Mesh(new THREE.ConeGeometry(0.5, 2, 6), new THREE.MeshBasicMaterial({ color: '#ff7b4d' })); this.scene.add(mesh); this._weaponPool.missiles[mi] = mesh; }
+        mesh.visible = true; mesh.position.set(ms.p[0], ms.p[1], ms.p[2]); mesh.rotation.x += dt * 8; mi++;
+      }
+    }
+    for (let i = ti; i < this._weaponPool.tracers.length; i++) this._weaponPool.tracers[i].visible = false;
+    for (let i = mi; i < this._weaponPool.missiles.length; i++) this._weaponPool.missiles[i].visible = false;
+
     // spitter globs
     const seenPj = new Set();
     for (const pj of b.projs || []) {

@@ -97,6 +97,10 @@ export class Input {
       data.punchR = this.mouseL || this.mouseR || k.has('KeyJ') || k.has('KeyK');
     }
     if (this.has(ROLE.HEAD)) data.fire = (hasL || hasR) ? k.has('KeyE') : this.mouseL;
+    // Ranged: ARMS hold right-click (or C) spins the rotary cannon;
+    // HEAD taps R to launch a rocket from the pods.
+    if (hasR || hasL) data.spin = this.mouseR || k.has('KeyC');
+    if (this.has(ROLE.HEAD)) data.launch = k.has('KeyR');
 
     this.net.sendInput(data);
   }

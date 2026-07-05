@@ -163,7 +163,14 @@ export const SHOP = [
   { id: 'rocket', name: 'ROCKET FIST', desc: 'RARE: whiffed punches launch the fist', price: 120 },
   { id: 'turret', name: 'SHOULDER TURRET', desc: 'RARE: auto-cannon tracks nearby hostiles', price: 140 },
   { id: 'dash', name: 'DASH THRUSTERS', desc: 'RARE: LEGS double-tap = thruster dash', price: 130 },
+  { id: 'cannon', name: 'ROTARY CANNON', desc: 'RARE: ARMS hold R-CLICK to spin up tracer fire', price: 150 },
+  { id: 'pods', name: 'ROCKET PODS', desc: 'RARE: HEAD fires homing rockets (ammo regens)', price: 160 },
 ];
+// Ranged weapon tuning
+export const WEAPONS = {
+  cannon: { spinUp: 0.6, rpm: 600, damage: 3, range: 55, spread: 0.05, tracerSpeed: 140 },
+  pods: { maxAmmo: 6, regenSec: 4, damage: 34, splash: 8, speed: 42, reload: 0.5 },
+};
 export const BEACON_RADIUS = 9;   // stand this close to a supply beacon to shop
 
 // ---------------------------------------------------------------------------

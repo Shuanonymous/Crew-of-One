@@ -225,11 +225,13 @@ export class BrawlGame {
     }
     if (roles.includes(ROLE.ARM_R)) {
       if (typeof data.punchR === 'boolean') inp.punchR = data.punchR;
+      if (typeof data.spin === 'boolean') inp.spin = data.spin;
       if (typeof data.aimYaw === 'number') inp.armYawR = data.aimYaw;
       if (typeof data.aimPitch === 'number') inp.armPitchR = data.aimPitch;
     }
     if (roles.includes(ROLE.HEAD)) {
       if (typeof data.fire === 'boolean') inp.fire = data.fire;
+      if (typeof data.launch === 'boolean') inp.launch = data.launch;
       if (typeof data.aimYaw === 'number') inp.headYaw = data.aimYaw;
       if (typeof data.aimPitch === 'number') inp.headPitch = data.aimPitch;
     }

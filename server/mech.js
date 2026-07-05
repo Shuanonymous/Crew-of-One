@@ -1,5 +1,5 @@
 import * as CANNON from 'cannon-es';
-import { MECH } from '../shared/constants.js';
+import { MECH, WEAPONS } from '../shared/constants.js';
 
 // The mech: one heavy dynamic torso that hovers on stiff invisible legs.
 // HUGE and SLOW on purpose — wind-ups, thundering steps, deliberate turns.
@@ -37,12 +37,14 @@ export class Mech {
       punchL: false, punchR: false,
       kick: false,
       dash: false,
-      fire: false,
+      fire: false,       // HEAD laser
+      spin: false,       // ARMS rotary cannon (hold)
+      launch: false,     // HEAD rocket pods (press)
     };
 
     this.hp = MECH.maxHp;
     this.maxHp = MECH.maxHp;
-    this.upgrades = { dmg: 0, armor: 0, speed: 0, laser: 0, rocket: false, turret: false, dash: false };
+    this.upgrades = { dmg: 0, armor: 0, speed: 0, laser: 0, rocket: false, turret: false, dash: false, cannon: false, pods: false };
     this.dashCd = 0;
     this.turretCd = 0;
     this.prevDash = false;
@@ -63,6 +65,13 @@ export class Mech {
     this.kick = { phase: 'idle', t: 0 };
     this.laser = { charge: 0, firing: false, fireT: 0, from: null, to: null };
     this.rockets = []; // flying fists: { side, p, v, t }
+    this.cannonSpin = 0;      // 0..1 spin-up
+    this.cannonCd = 0;
+    this.tracers = [];        // { p, v, t }
+    this.podAmmo = 0;         // filled when 'pods' upgrade owned
+    this.podRegen = 0;
+    this.missiles = [];       // { p, v, t, target }
+    this.prevLaunch = false;
 
     this.stats = { damageDealt: 0, punches: 0, kicks: 0, lasers: 0, falls: 0, byPart: { ARMS: 0, LEGS: 0, HEAD: 0, TURRET: 0 } };
     this.events = [];
@@ -197,6 +206,8 @@ export class Mech {
       }
     }
 
+    this.updateCannon(dt, targets);
+    this.updatePods(dt, targets);
     this.updatePunches(dt, targets);
     this.updateKick(dt, targets);
     this.updateLaser(dt, targets);
@@ -210,6 +221,122 @@ export class Mech {
       this.tiltT = 0;
     }
     if (b.position.y < -20) { this.body.position.copy(this.spawn); this.body.velocity.setZero(); }
+  }
+
+  // ---------------------------------------------------------- rotary cannon
+  updateCannon(dt, targets) {
+    this.updateTracers(dt, targets);
+    const W = WEAPONS.cannon;
+    if (!this.upgrades.cannon) { this.cannonSpin = Math.max(0, this.cannonSpin - dt * 2); return; }
+    if (this.input.spin && !this.laserLock) {
+      this.cannonSpin = Math.min(1, this.cannonSpin + dt / W.spinUp);
+      if (this.cannonSpin >= 1) {
+        this.cannonCd -= dt;
+        if (this.cannonCd <= 0) {
+          this.cannonCd = 60 / W.rpm;
+          const yaw = this.input.armYawR + (Math.random() - 0.5) * W.spread;
+          const pitch = this.input.armPitchR;
+          const dir = aimDir(yaw, pitch);
+          const from = this.body.position.clone(); from.y += 1;
+          from.x += dir.x * 3; from.z += dir.z * 3;
+          this.tracers.push({ p: from, v: dir.scale(W.tracerSpeed), t: 0 });
+          this.events.push({ what: 'cannonFire', p: [rnd(from.x), rnd(from.y), rnd(from.z)] });
+          // slight recoil
+          this.body.applyImpulse(dir.scale(-25));
+        }
+      }
+    } else {
+      this.cannonSpin = Math.max(0, this.cannonSpin - dt * 1.5);
+      this.cannonCd = 0;
+    }
+  }
+
+  updateTracers(dt, targets) {
+    const W = WEAPONS.cannon;
+    for (const tr of this.tracers) {
+      tr.t += dt;
+      const step = tr.v.scale(dt, new CANNON.Vec3());
+      tr.p.vadd(step, tr.p);
+      for (const tg of targets) {
+        if (!tg.alive || tg.body === this.body || tg.id === 'car') continue;
+        if (tg.body.position.distanceTo(tr.p) < (tg.radius || 2) + 1) {
+          const dealt = tg.takeHit(W.damage * (1 + 0.2 * this.upgrades.dmg), tr.p, 60, 'ranged');
+          this.stats.damageDealt += dealt ?? W.damage;
+          this.stats.byPart.ARMS = (this.stats.byPart.ARMS || 0) + (dealt ?? W.damage);
+          tr.t = 99; break;
+        }
+      }
+      if (tr.p.distanceTo(this.body.position) > W.range) tr.t = 99;
+    }
+    this.tracers = this.tracers.filter((tr) => tr.t < 90);
+  }
+
+  // ------------------------------------------------------------ rocket pods
+  updatePods(dt, targets) {
+    this.updateMissiles(dt, targets);
+    const W = WEAPONS.pods;
+    if (!this.upgrades.pods) return;
+    if (this.podAmmo === 0 && this.podRegen === 0) this.podAmmo = W.maxAmmo; // first install
+    if (this.podAmmo < W.maxAmmo) {
+      this.podRegen += dt;
+      if (this.podRegen >= W.regenSec) { this.podRegen = 0; this.podAmmo++; this.events.push({ what: 'podReload' }); }
+    }
+    const pressed = this.input.launch && !this.prevLaunch;
+    this.prevLaunch = this.input.launch;
+    if (pressed && this.podAmmo > 0 && (this.podFireCd || 0) <= 0) {
+      this.podAmmo--;
+      this.podFireCd = W.reload;
+      // acquire nearest hostile as homing target
+      let best = null, bd = 90;
+      for (const tg of targets) {
+        if (!tg.alive || tg.body === this.body || tg.id === 'car') continue;
+        const d = tg.body.position.distanceTo(this.body.position);
+        if (d < bd) { bd = d; best = tg; }
+      }
+      const dir = aimDir(this.input.headYaw, this.input.headPitch + 0.2);
+      const from = this.body.position.clone(); from.y += 3;
+      this.missiles.push({ p: from, v: dir.scale(W.speed), t: 0, target: best });
+      this.events.push({ what: 'podFire', p: [rnd(from.x), rnd(from.y), rnd(from.z)] });
+    }
+    if (this.podFireCd > 0) this.podFireCd -= dt;
+  }
+
+  updateMissiles(dt, targets) {
+    const W = WEAPONS.pods;
+    for (const ms of this.missiles) {
+      ms.t += dt;
+      // home toward target
+      if (ms.target && ms.target.alive) {
+        const to = ms.target.body.position.vsub(ms.p);
+        to.normalize();
+        ms.v.vadd(to.scale(W.speed * 2.5 * dt), ms.v);
+        const sp = ms.v.length();
+        if (sp > W.speed) ms.v.scale(W.speed / sp, ms.v);
+      }
+      ms.p.vadd(ms.v.scale(dt, new CANNON.Vec3()), ms.p);
+      // detonate near any hostile
+      let hit = null;
+      for (const tg of targets) {
+        if (!tg.alive || tg.body === this.body || tg.id === 'car') continue;
+        if (tg.body.position.distanceTo(ms.p) < (tg.radius || 2) + 2) { hit = tg; break; }
+      }
+      if (hit || ms.t > 4) {
+        if (hit) {
+          // splash
+          for (const tg of targets) {
+            if (!tg.alive || tg.body === this.body || tg.id === 'car') continue;
+            if (tg.body.position.distanceTo(ms.p) < W.splash) {
+              const dealt = tg.takeHit(W.damage, ms.p, 1500, 'rocket');
+              this.stats.damageDealt += dealt ?? W.damage;
+              this.stats.byPart.HEAD = (this.stats.byPart.HEAD || 0) + (dealt ?? W.damage);
+            }
+          }
+          this.events.push({ what: 'podHit', p: [rnd(ms.p.x), rnd(ms.p.y), rnd(ms.p.z)] });
+        }
+        ms.t = 99;
+      }
+    }
+    this.missiles = this.missiles.filter((ms) => ms.t < 90);
   }
 
   // ---------------------------------------------------------------- punches
@@ -498,6 +625,10 @@ export class Mech {
         aimHit: !!this.laser.aimHit,
       },
       rockets: this.rockets.map((r) => ({ side: r.side, p: [rnd(r.p.x), rnd(r.p.y), rnd(r.p.z)] })),
+      cannonSpin: rnd(this.cannonSpin),
+      tracers: this.tracers.map((t) => ({ p: [rnd(t.p.x), rnd(t.p.y), rnd(t.p.z)] })),
+      missiles: this.missiles.map((ms) => ({ p: [rnd(ms.p.x), rnd(ms.p.y), rnd(ms.p.z)] })),
+      podAmmo: this.podAmmo,
       up: this.upgrades,
       ev: this.events,
     };

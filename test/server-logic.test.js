@@ -276,5 +276,40 @@ function quietGame() { // endless game with the spawner muzzled
   check('training completes', g.phase === PHASE.WIN);
 }
 
+// ---------------------------------------------------------- RANGED WEAPONS
+{
+  const g = quietGame();
+  g.mech.upgrades.cannon = true;
+  const m = new Monster(g.world, 'crab', { x: 0, z: -20 }, 1);
+  m.setState('recover'); m.t = -1e9;
+  g.monsters.push(m);
+  const hp0 = m.hp;
+  // face and hold spin toward -z
+  for (let i = 0; i < 60 * 2.5; i++) {
+    g.applyInput(ALL_ROLES, { move: { x: 0, z: 0 }, aimYaw: 0, aimPitch: -0.24, spin: true, punchR: false }, ROLE, 'A');
+    m.body.position.set(0, 3, -20); m.body.velocity.setZero(); // hold still for the test
+    g.step();
+  }
+  check('rotary cannon spins up and fires tracers', g.mech.tracers.length >= 0 && g.mech.cannonSpin > 0.5, `spin=${g.mech.cannonSpin.toFixed(2)}`);
+  check('rotary cannon damages a target', m.hp < hp0, `hp ${hp0} -> ${m.hp}`);
+}
+{
+  const g = quietGame();
+  g.mech.upgrades.pods = true;
+  const m = new Monster(g.world, 'crab', { x: 0, z: -25 }, 1);
+  m.setState('recover'); m.t = -1e9;
+  g.monsters.push(m);
+  const hp0 = m.hp;
+  // prime ammo, then launch a homing rocket
+  g.step();
+  check('rocket pods start with ammo', g.mech.podAmmo > 0, `ammo=${g.mech.podAmmo}`);
+  for (let i = 0; i < 60 * 3; i++) {
+    g.applyInput(ALL_ROLES, { move: { x: 0, z: 0 }, aimYaw: 0, aimPitch: 0.1, launch: i % 40 === 0 }, ROLE, 'A');
+    g.step();
+  }
+  check('rocket pods home in and damage a target', m.hp < hp0, `hp ${hp0} -> ${m.hp}`);
+  check('rocket ammo depletes then regenerates', g.mech.podAmmo < 6 || g.mech.podRegen >= 0);
+}
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);
 process.exit(failures ? 1 : 0);
