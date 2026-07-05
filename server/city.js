@@ -104,7 +104,6 @@ export function buildCity(world, seed = 'TRAIN') {
     return null;
   };
 
-  for (let i = 0; i < 5; i++) { const p = place(24, 150); if (p) interactables.beacons.push({ id: 'bc' + i, p: [p[0], 0, p[1]] }); }
   for (let i = 0; i < 10; i++) { const p = place(14, 160); if (p) interactables.tanks.push({ id: 'ft' + i, p: [p[0], 2, p[1]], hp: 1, alive: true }); }
   for (let i = 0; i < 3; i++) { const p = place(30, 140); if (p) interactables.stations.push({ id: 'rs' + i, p: [p[0], 0, p[1]], hp: 80, maxHp: 80, alive: true }); }
   for (let i = 0; i < 8; i++) { const p = place(20, 160); if (p) interactables.caches.push({ id: 'cc' + i, p: [p[0], 1.5, p[1]], hp: 20, alive: true, credits: 15 + Math.floor(rng() * 16) }); }

@@ -441,7 +441,7 @@ export class Renderer {
 
     // endless-run interactables
     this.beaconViews = [];
-    for (const b of world.beacons || []) {
+    for (const b of []) { // beacons removed — endless buys anywhere
       const grp = new THREE.Group();
       const pylon = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.4, 9, 8),
         new THREE.MeshLambertMaterial({ color: '#2a3145' }));

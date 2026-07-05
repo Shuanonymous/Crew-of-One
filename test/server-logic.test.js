@@ -29,9 +29,15 @@ function quietGame() { // endless game with the spawner muzzled
 {
   const g = new BrawlGame(120);
   check('run has a 5-char seed', /^[A-Z2-9]{5}$/.test(g.seed), g.seed);
-  check('world has beacons/tanks/stations/caches',
-    g.inter.beacons.length >= 3 && g.inter.tanks.length >= 6 && g.inter.stations.length >= 2 && g.inter.caches.length >= 5,
-    `b=${g.inter.beacons.length} t=${g.inter.tanks.length} s=${g.inter.stations.length} c=${g.inter.caches.length}`);
+  check('CONSTRAINT: Endless has NO supply beacons (removed)',
+    g.inter.beacons.length === 0 && !g.worldInfo().beacons,
+    `beacons=${g.inter.beacons.length}`);
+  check('world still has tanks/stations/caches',
+    g.inter.tanks.length >= 6 && g.inter.stations.length >= 2 && g.inter.caches.length >= 5,
+    `t=${g.inter.tanks.length} s=${g.inter.stations.length} c=${g.inter.caches.length}`);
+  check('Endless buy needs NO beacon (buy anywhere)', (() => {
+    g.credits = 500; const r = g.buy('dmg'); return r.ok && g.mech.upgrades.dmg === 1;
+  })());
 
   stepFor(g, 14, { move: { x: 0, z: 0 }, aimYaw: 0 });
   check('danger clock advances', g.dangerLevel > 0.2, `level=${g.dangerLevel.toFixed(2)}`);
@@ -47,8 +53,9 @@ function quietGame() { // endless game with the spawner muzzled
   // endless shop is buy-anywhere (no beacon required)
   g.mech.body.position.set(500, 8, 500); // nowhere near a beacon
   g.credits = 1000;
+  const dmgBefore = g.mech.upgrades.dmg;
   const near = g.buy('dmg');
-  check('endless shop works anywhere', near.ok && g.mech.upgrades.dmg === 1);
+  check('endless shop works anywhere', near.ok && g.mech.upgrades.dmg === dmgBefore + 1);
   const p1 = g.priceOf({ id: 'dmg', price: 45, priceGrowth: 1.35 });
   check('repeatable tier price grows', p1 > 45, `next=${p1}`);
   g.buy('dash');

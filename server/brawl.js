@@ -33,7 +33,7 @@ export class BrawlGame {
     this.spawnPoints = 0;     // spawner wallet
     this.graceT = 8;          // a breath before the first spawns
     this.bossSpawned = new Set();
-    this.credits = 0;
+    this.credits = Number(process.env.COO_TEST_CREDITS) || 0;
     this.creditsEarned = 0;
     this.kills = 0;
     this.buyCounts = {};      // shop tier pricing
@@ -335,7 +335,7 @@ export class BrawlGame {
   worldInfo() {
     return {
       city: this.cityDefs, mode: 'brawl', seed: this.seed, props: this.carDefs,
-      beacons: this.inter.beacons, tanks: this.inter.tanks.map((t) => ({ id: t.id, p: t.p })),
+      tanks: this.inter.tanks.map((t) => ({ id: t.id, p: t.p })),
       stations: this.inter.stations.map((s) => ({ id: s.id, p: s.p })),
       caches: this.inter.caches.map((c) => ({ id: c.id, p: c.p })),
       worldHalf: WORLD_HALF,
@@ -353,7 +353,6 @@ export class BrawlGame {
       credits: this.credits,
       shopOpen: true,
       shopAvailable: true,
-      beaconId: this.nearBeacon?.id || null,
       prices: Object.fromEntries(SHOP.map((it) => [it.id, this.priceOf(it)])),
       mechs: [this.mech.snapshot()],
       monsters: this.monsters.map((m) => m.snapshot()),

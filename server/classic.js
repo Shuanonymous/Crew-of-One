@@ -66,6 +66,15 @@ export class ClassicWaveGame extends BrawlGame {
     return { ok: true };
   }
 
+  // test-only: jump straight to the safe shop phase
+  forceShop() {
+    for (const m of this.monsters) { m.hp = 0; m.removed = true; try { this.world.removeBody(m.body); } catch {} }
+    this.monsters = [];
+    this.phase = PHASE.SHOP;
+    this.phaseT = 999;
+    this.ready = false;
+  }
+
   shopDone() {
     if (this.phase === PHASE.SHOP) {
       this.ready = true;

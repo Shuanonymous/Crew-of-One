@@ -3,11 +3,15 @@ import { Input } from '/js/input.js';
 import { Renderer } from '/js/render.js';
 import { sfx } from '/js/sfx.js';
 import { music } from '/js/music.js';
-import { ROLE, MODES, PHASE, SHOP, roleTitle, MECH } from '/shared/constants.js';
+import { ROLE, MODES, PHASE, SHOP, MSG, roleTitle, MECH } from '/shared/constants.js';
 
 function audioOn() {
-  sfx.unlock();
-  if (sfx.ctx) music.start(sfx.ctx, sfx.master);
+  // never let an audio failure (blocked autoplay, AudioContext limits,
+  // privacy modes) break a UI action like creating a room
+  try {
+    sfx.unlock();
+    if (sfx.ctx) music.start(sfx.ctx, sfx.master);
+  } catch (e) { console.warn('audio unavailable:', e.message); }
 }
 
 // App flow: TITLE -> LOBBY -> GAME (hud + shop + end overlays) -> LOBBY...
@@ -384,11 +388,16 @@ function updateHud(snap) {
     const endlessShop = state.mode === MODES.BRAWL && state.shopManual;
     if ((classicShop || endlessShop) && state.screen === 'game') {
       show('shop');
-      renderShopItems(snap);
+      state.shopKey = null;
     } else if (state.screen === 'shop' && !classicShop && !endlessShop) {
       show('game');
-    } else if (state.screen === 'shop') {
-      renderShopItems(snap);
+    }
+    // REBUILD ONLY ON CHANGE. Rebuilding the button list every 50ms snapshot
+    // destroyed the node between mousedown and mouseup, so clicks never
+    // registered — the production shop bug. Guarded by e2e-shop.test.js.
+    if (state.screen === 'shop') {
+      const key = JSON.stringify([snap.credits, snap.prices, mine.up]);
+      if (key !== state.shopKey) { state.shopKey = key; renderShopItems(snap); }
     }
   }
 
@@ -474,7 +483,7 @@ function renderShopItems(snap) {
     btn.disabled = owned || (snap && snap.credits < price);
     btn.innerHTML = `<b>${item.name}${tier}</b><span class="si-desc">${item.desc}</span>
       <span class="si-price">${owned ? 'INSTALLED ✓' : '© ' + price}</span>`;
-    btn.onclick = () => { sfx.click(); net.send({ t: 'buy', item: item.id }); };
+    btn.onpointerdown = (e) => { e.preventDefault(); sfx.click(); net.send({ t: 'buy', item: item.id }); };
     wrap.appendChild(btn);
   }
   $('shop-title').textContent = state.mode === MODES.CLASSIC ? '🛠 WAVE CLEARED — UPGRADE BAY' : '⚙ ENDLESS UPGRADES';
@@ -688,7 +697,7 @@ function titleCity() {
 }
 
 // Test harness handle for automated browser checks; not shown in the UI.
-window.__coo = { input, net, state, renderer };
+window.__coo = { input, net, state, renderer, openSettings, closeSettings };
 
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function escapeHtml(s) {

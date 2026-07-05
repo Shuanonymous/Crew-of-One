@@ -93,6 +93,10 @@ export class RoomManager {
       case MSG.TO_LOBBY:
         room?.toLobby(id);
         break;
+      case 'testShop':
+        // test-only, gated by COO_TEST_CREDITS (never set in production)
+        if (process.env.COO_TEST_CREDITS && room?.game?.forceShop) room.game.forceShop();
+        break;
     }
   }
 
