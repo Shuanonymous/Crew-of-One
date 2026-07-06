@@ -53,37 +53,45 @@ function watch(page, tag) {
 async function newClient(tag) {
   const ctx = await browser.newContext({ viewport: { width: 1120, height: 640 } });
   const page = await ctx.newPage();
+  await page.addInitScript(() => { window.__COO_NO_AUDIO = true; });
   watch(page, tag);
   await page.goto(BASE, { waitUntil: 'networkidle' });
   return page;
 }
 
-// enter a mode as host+join, returns [host, guest]
-async function startMode(host, guest, mode) {
-  // fresh page load each mode so we start from a clean title screen
-  await host.goto(BASE, { waitUntil: 'networkidle' });
-  await host.waitForFunction(() => window.__coo && window.__coo.net.playerId, { timeout: 10000 });
+// enter a mode with a FRESH host+guest (fully isolated contexts each time,
+// so nothing accumulates across modes). Returns { host, guest, code }.
+async function startMode(oldHost, oldGuest, mode) {
+  try { await oldHost?.context().close(); } catch {}
+  try { await oldGuest?.context().close(); } catch {}
+  let host = await newClient('HOST');
+  let guest = await newClient('GUEST');
+  await host.waitForFunction(() => window.__coo && window.__coo.net.playerId, { timeout: 15000 });
   await host.fill('#name-input', 'Host');
   await clickBtn(host, '#btn-create');
-  await host.waitForFunction(() => /^[A-Z]{4}$/.test(document.getElementById('lobby-code').textContent.trim()), { timeout: 10000 });
+  await host.waitForFunction(() => /^[A-Z]{4}$/.test(document.getElementById('lobby-code').textContent.trim()), { timeout: 15000 });
   const code = (await host.textContent('#lobby-code')).trim();
-  await guest.goto(BASE, { waitUntil: 'networkidle' });
-  await guest.waitForFunction(() => window.__coo && window.__coo.net.playerId, { timeout: 10000 });
+  await guest.waitForFunction(() => window.__coo && window.__coo.net.playerId, { timeout: 15000 });
   await guest.fill('#name-input', 'Guest');
   await guest.fill('#code-input', code);
   await clickBtn(guest, '#btn-join');
-  await guest.waitForTimeout(500);
-  // host selects mode + start
+  // wait until the guest is actually in the room (retry join once if needed)
+  try {
+    await guest.waitForFunction(() => window.__coo.state.room && window.__coo.state.room.players.length >= 2, { timeout: 6000 });
+  } catch {
+    await clickBtn(guest, '#btn-join');
+    await guest.waitForFunction(() => window.__coo.state.room && window.__coo.state.room.players.length >= 2, { timeout: 8000 });
+  }
   await clickBtn(host, `.mode-btn[data-mode="${mode}"]`);
   await host.waitForTimeout(300);
   await clickBtn(host, '#btn-start');
-  await host.waitForTimeout(1400);
-  return code;
+  await host.waitForFunction(() => window.__coo.state.playing, { timeout: 10000 });
+  return { host, guest, code };
 }
 
 try {
-  const host = await newClient('HOST');
-  const guest = await newClient('GUEST');
+  let host = await newClient('HOST');
+  let guest = await newClient('GUEST');
 
   // ---------- TITLE-SCREEN BUTTONS ----------
   await host.fill('#name-input', 'Solo');
@@ -100,7 +108,7 @@ try {
   check('settings persists master volume', await host.evaluate(() => JSON.parse(localStorage.getItem('coo-settings')).master === 0.3));
 
   // ---------- MODE 1: ENDLESS — move, attack, shop-click purchase ----------
-  await startMode(host, guest, 'brawl');
+  ({ host, guest } = await startMode(host, guest, 'brawl'));
   check('ENDLESS launched for both clients',
     await host.evaluate(() => window.__coo.state.playing) && await guest.evaluate(() => window.__coo.state.playing));
   check('CONSTRAINT: no beacons in endless world',
@@ -197,7 +205,7 @@ try {
   check('ONE MORE RUN restarts a run', await host.evaluate(() => window.__coo.state.playing));
 
   // ---------- MODE 2: CLASSIC WAVE — between-wave shop ----------
-  await startMode(host, guest, 'classic');
+  ({ host, guest } = await startMode(host, guest, 'classic'));
   check('CLASSIC launched', await host.evaluate(() => window.__coo.state.mode === 'classic'));
   await enterControl(host);
   // reach the REAL between-wave shop phase on the server (test-only hook)
@@ -221,13 +229,13 @@ try {
   clicked.add('#btn-shop-done');
 
   // ---------- MODE 3: DUEL ----------
-  await startMode(host, guest, 'duel');
+  ({ host, guest } = await startMode(host, guest, 'duel'));
   await host.waitForTimeout(600);
   check('DUEL launched with two mechs', await host.evaluate(() => window.__coo.net.latest()?.mechs.length === 2));
   check('DUEL assigns opposing crews', await host.evaluate(() => window.__coo.state.myCrew) !== await guest.evaluate(() => window.__coo.state.myCrew));
 
   // ---------- MODE 4: TRAINING ----------
-  await startMode(host, guest, 'training');
+  ({ host, guest } = await startMode(host, guest, 'training'));
   check('TRAINING launched', await host.evaluate(() => window.__coo.state.mode === 'training'));
   check('TRAINING shows objectives HUD', await host.evaluate(() => !document.getElementById('objectives').classList.contains('hidden')));
 

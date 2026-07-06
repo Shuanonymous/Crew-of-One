@@ -24,6 +24,7 @@ const errors = [];
 
 try {
   const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
+  await page.addInitScript(() => { window.__COO_NO_AUDIO = true; });
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push('PAGEERROR: ' + e.message));
   await page.goto(BASE, { waitUntil: 'networkidle' });

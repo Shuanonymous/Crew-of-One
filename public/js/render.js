@@ -32,6 +32,9 @@ export class Renderer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.scene = new THREE.Scene();
     this.skyCanvas = document.createElement('canvas');
@@ -167,7 +170,7 @@ export class Renderer {
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.55, 0.5, 0.82);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.9, 0.6, 0.6);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
 
@@ -304,6 +307,30 @@ export class Renderer {
     this.effects.push({ m, t: 0, dur, maxR, kind: 'ring' });
   }
 
+  // drifting smoke puff (rocket trails, explosions)
+  smoke(pos) {
+    const m = new THREE.Mesh(
+      new THREE.SphereGeometry(0.7 + Math.random() * 0.5, 6, 5),
+      new THREE.MeshBasicMaterial({ color: '#6b6b78', transparent: true, opacity: 0.5 })
+    );
+    m.position.set(pos[0] + (Math.random() - 0.5), pos[1], pos[2] + (Math.random() - 0.5));
+    this.scene.add(m);
+    this.effects.push({ m, t: 0, dur: 1.1, kind: 'smoke', rise: 3 + Math.random() * 2 });
+    const smokes = this.effects.filter((e) => e.kind === 'smoke');
+    if (smokes.length > 60) { smokes[0].t = smokes[0].dur; }
+  }
+
+  // bright muzzle flash at a world point (gunfire / rocket launch)
+  muzzle(pos, color = '#fff2c0', size = 2.4) {
+    const m = new THREE.Mesh(
+      new THREE.SphereGeometry(size, 8, 6),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 })
+    );
+    m.position.set(pos[0], pos[1], pos[2]);
+    this.scene.add(m);
+    this.effects.push({ m, t: 0, dur: 0.12, kind: 'muzzle' });
+  }
+
   scorch(pos, r = 3.2) {
     const m = new THREE.Mesh(
       new THREE.CircleGeometry(r, 20),
@@ -328,6 +355,13 @@ export class Renderer {
         e.m.material.opacity = 0.95 * (1 - k);
       } else if (e.kind === 'scorch') {
         e.m.material.opacity = 0.75 * (1 - Math.max(0, k - 0.7) / 0.3);
+      } else if (e.kind === 'smoke') {
+        e.m.position.y += e.rise * dt;
+        e.m.scale.setScalar(1 + k * 1.8);
+        e.m.material.opacity = 0.5 * (1 - k);
+      } else if (e.kind === 'muzzle') {
+        e.m.scale.setScalar(1 + k * 1.5);
+        e.m.material.opacity = 0.95 * (1 - k);
       }
       if (e.t >= e.dur) this.scene.remove(e.m);
     }
@@ -393,9 +427,11 @@ export class Renderer {
 
     for (const d of world.city) {
       if (d.kind === 'ground') {
+        // rain-slicked asphalt: dark, semi-metallic, low roughness so it
+        // mirrors the neon sky/city through the env map (cinematic wet look)
         const mesh = new THREE.Mesh(
           new THREE.BoxGeometry(...d.size),
-          new THREE.MeshLambertMaterial({ color: d.color })
+          new THREE.MeshStandardMaterial({ color: '#0e1220', metalness: 0.85, roughness: 0.28, envMapIntensity: 1.2 })
         );
         mesh.position.set(...d.p);
         mesh.receiveShadow = true;
@@ -658,17 +694,36 @@ export class Renderer {
 
     // mech tracers + missiles (ranged weapons) — pooled scene meshes
     this._weaponPool = this._weaponPool || { tracers: [], missiles: [] };
+    this._trPrev = this._trPrev || new Map(); // last position per tracer, for streak orientation
     let ti = 0, mi = 0;
     for (const mb of b.mechs) {
       for (const tr of mb.tracers || []) {
         let mesh = this._weaponPool.tracers[ti];
-        if (!mesh) { mesh = new THREE.Mesh(new THREE.SphereGeometry(0.35, 6, 6), new THREE.MeshBasicMaterial({ color: '#ffd98a' })); this.scene.add(mesh); this._weaponPool.tracers[ti] = mesh; }
-        mesh.visible = true; mesh.position.set(tr.p[0], tr.p[1], tr.p[2]); ti++;
+        if (!mesh) {
+          // elongated glowing round — reads as a tracer streak, not a ball
+          mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.4, 6),
+            new THREE.MeshBasicMaterial({ color: '#fff2c0' }));
+          this.scene.add(mesh); this._weaponPool.tracers[ti] = mesh;
+        }
+        mesh.visible = true;
+        const cur = new V3(tr.p[0], tr.p[1], tr.p[2]);
+        const prev = this._trPrev.get(ti);
+        if (prev) mesh.quaternion.setFromUnitVectors(new V3(0, 1, 0), cur.clone().sub(prev).normalize());
+        this._trPrev.set(ti, cur.clone());
+        mesh.position.copy(cur);
+        ti++;
       }
       for (const ms of mb.missiles || []) {
         let mesh = this._weaponPool.missiles[mi];
-        if (!mesh) { mesh = new THREE.Mesh(new THREE.ConeGeometry(0.5, 2, 6), new THREE.MeshBasicMaterial({ color: '#ff7b4d' })); this.scene.add(mesh); this._weaponPool.missiles[mi] = mesh; }
-        mesh.visible = true; mesh.position.set(ms.p[0], ms.p[1], ms.p[2]); mesh.rotation.x += dt * 8; mi++;
+        if (!mesh) {
+          mesh = new THREE.Mesh(new THREE.ConeGeometry(0.5, 2.2, 8),
+            new THREE.MeshStandardMaterial({ color: '#e8503a', emissive: new THREE.Color('#ff6a3a'), emissiveIntensity: 2, metalness: 0.4, roughness: 0.5 }));
+          this.scene.add(mesh); this._weaponPool.missiles[mi] = mesh;
+        }
+        mesh.visible = true; mesh.position.set(ms.p[0], ms.p[1], ms.p[2]); mesh.rotation.x += dt * 8;
+        // smoke trail: drop a fading puff behind the rocket
+        if (Math.random() < 0.7) this.smoke(ms.p);
+        mi++;
       }
     }
     for (let i = ti; i < this._weaponPool.tracers.length; i++) this._weaponPool.tracers[i].visible = false;

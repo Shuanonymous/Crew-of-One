@@ -6,6 +6,7 @@ import { music } from '/js/music.js';
 import { ROLE, MODES, PHASE, SHOP, MSG, roleTitle, MECH } from '/shared/constants.js';
 
 function audioOn() {
+  if (window.__COO_NO_AUDIO) return; // E2E: avoid AudioContext limits across reloads
   // never let an audio failure (blocked autoplay, AudioContext limits,
   // privacy modes) break a UI action like creating a room
   try {
@@ -314,9 +315,9 @@ function handleEvents(snap) {
         case 'dmgNum': dmgNumber(ev.p, ev.dmg, ev.laser ? 'laser' : ev.dmg >= 30 ? 'big' : ''); if (ev.laser) sfx.ping(); break;
         case 'dash': sfx.whoosh(); renderer.ring(mech.p, '#8aa5ff', 10, 0.4); break;
         case 'turretFire': sfx.click(); if (ev.to) renderer.burst(ev.to, '#ffd166', 3, 8); break;
-        case 'cannonFire': sfx.click(); renderer.shake(0.05); if (ev.p) renderer.burst(ev.p, '#ffd98a', 2, 6); break;
-        case 'podFire': sfx.rocket(); if (ev.p) renderer.burst(ev.p, '#ffb36b', 5, 10); break;
-        case 'podHit': sfx.clang(1.4); renderer.shake(0.4); hitstop(60); if (ev.p) { renderer.ring(ev.p, '#ff7b4d', 10, 0.5); renderer.burst(ev.p, '#ff7b4d', 18, 16); } break;
+        case 'cannonFire': sfx.click(); renderer.shake(0.05); if (ev.p) renderer.muzzle(ev.p, '#fff2c0', 1.6); break;
+        case 'podFire': sfx.rocket(); if (ev.p) { renderer.muzzle(ev.p, '#ffca8a', 2.2); renderer.smoke(ev.p); } break;
+        case 'podHit': sfx.clang(1.4); renderer.shake(0.5); hitstop(70); if (ev.p) { renderer.muzzle(ev.p, '#ffd08a', 3.5); renderer.ring(ev.p, '#ff7b4d', 12, 0.5); renderer.burst(ev.p, '#ff7b4d', 22, 18); renderer.smoke(ev.p); renderer.smoke(ev.p); renderer.scorch(ev.p, 3); } break;
         case 'podReload': break;
       }
     }
