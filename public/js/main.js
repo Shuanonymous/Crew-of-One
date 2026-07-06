@@ -498,16 +498,29 @@ function renderShopItems(snap) {
 }
 $('btn-shop-done').onclick = () => {
   sfx.click();
-  if (state.mode === MODES.BRAWL) { state.shopManual = false; show('game'); return; }
+  if (state.mode === MODES.BRAWL) { closeShop(); return; }
   net.send({ t: 'shopDone' });
 };
-$('btn-upgrades').onclick = () => {
-  if (state.mode !== MODES.BRAWL) return;
+// Open/close the Endless upgrade overlay. Releasing pointer lock is
+// essential — while locked the mouse is captured and shop items can't be
+// clicked, which is what made the shop feel "broken".
+function openShop() {
+  if (state.mode !== MODES.BRAWL || state.screen === 'shop') return;
   sfx.click();
   state.shopManual = true;
+  state.shopKey = null;
+  if (document.pointerLockElement) document.exitPointerLock?.();
   show('shop');
   renderShopItems(net.latest());
-};
+}
+function closeShop() {
+  if (state.mode !== MODES.BRAWL) return;
+  sfx.click();
+  state.shopManual = false;
+  show('game');
+  $('click-catch').classList.remove('hidden'); // re-prompt to re-grab controls
+}
+$('btn-upgrades').onclick = openShop;
 
 // ---------------------------------------------------------------- end
 function showEnd(snap) {
@@ -568,6 +581,14 @@ const pings = [];
 net.onPing = (msg) => { pings.push({ ...msg, t: performance.now() }); sfx.ping(); };
 window.addEventListener('keydown', (e) => {
   if (!state.playing || state.spectator) return;
+  // B toggles the Endless upgrade shop from anywhere — even while
+  // pointer-locked mid-fight (this was the missing handler; the "(B)"
+  // label promised it but nothing listened). Guarded by an E2E keypress.
+  if (e.code === 'KeyB' && state.mode === MODES.BRAWL) {
+    e.preventDefault();
+    if (state.screen === 'shop') { closeShop(); } else { openShop(); }
+    return;
+  }
   const snap = net.latest();
   const mine = snap && myMech(snap);
   if (!mine) return;
@@ -711,7 +732,7 @@ function titleCity() {
 }
 
 // Test harness handle for automated browser checks; not shown in the UI.
-window.__coo = { input, net, state, renderer, openSettings, closeSettings };
+window.__coo = { input, net, state, renderer, openSettings, closeSettings, openShop, closeShop };
 
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function escapeHtml(s) {

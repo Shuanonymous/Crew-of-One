@@ -124,7 +124,18 @@ try {
     // teleport a monster in front for a deterministic hit
     const g = window.__coo; // client can't move server bodies; rely on natural spawns
   });
-  // open the upgrade menu mid-run (Endless: UPGRADES button — a real DOM click)
+  // REGRESSION: pressing B must open the shop the way a real player does,
+  // even while "in control". (The (B) label promised this but nothing
+  // listened — the user reported B did nothing. This presses the real key.)
+  await host.evaluate(() => { document.getElementById('click-catch').classList.add('hidden'); window.__coo.state.playing = true; });
+  await host.keyboard.press('b');
+  await host.waitForTimeout(500);
+  check('REGRESSION: B key opens the Endless shop', !(await host.$eval('#screen-shop', (e) => e.classList.contains('hidden'))));
+  // B again closes it
+  await host.keyboard.press('b');
+  await host.waitForTimeout(400);
+  check('REGRESSION: B key closes the Endless shop', await host.$eval('#screen-shop', (e) => e.classList.contains('hidden')));
+  // reopen for the purchase test via the button too (both paths must work)
   await host.evaluate(() => { document.exitPointerLock?.(); document.getElementById('click-catch').classList.add('hidden'); });
   await host.evaluate(() => document.getElementById('btn-upgrades').click());
   clicked.add('#btn-upgrades');
