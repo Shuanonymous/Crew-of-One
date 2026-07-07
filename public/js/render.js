@@ -1355,52 +1355,97 @@ class CrabView {
     const dark = new THREE.MeshLambertMaterial({ color: style.dark });
     this.flashMats = [shell, belly, dark];
 
-    const body = new THREE.Mesh(new THREE.BoxGeometry(5.6, 2.6, 4.2), shell);
-    body.castShadow = true;
-    this.root.add(body);
-    const under = new THREE.Mesh(new THREE.BoxGeometry(4.6, 1.2, 3.4), belly);
-    under.position.y = -1.1;
+    // domed rocky carapace (flat-shaded low-poly = chitinous, not a box)
+    const carapace = new THREE.Mesh(new THREE.IcosahedronGeometry(3.3, 1),
+      new THREE.MeshLambertMaterial({ color: style.shell, flatShading: true }));
+    carapace.scale.set(1.05, 0.62, 0.92);
+    carapace.position.y = 0.5;
+    carapace.castShadow = true;
+    this.root.add(carapace);
+    this.flashMats.push(carapace.material);
+    // segmented lower body / mouth mass
+    const under = new THREE.Mesh(new THREE.BoxGeometry(4.6, 1.4, 3.4), belly);
+    under.position.y = -0.9;
     this.root.add(under);
-
-    // predator eye slits — dangerous, not adorable
-    this.eyes = [];
+    // serrated mandible plates at the front
     for (const s of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.22, 0.3),
+      const mand = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.6, 5), dark);
+      mand.rotation.x = -Math.PI / 2.1; mand.rotation.z = s * 0.3;
+      mand.position.set(s * 0.7, -0.4, -2.5);
+      this.root.add(mand);
+    }
+    // ridge of back spikes down the carapace — kaiju menace
+    for (let i = 0; i < 5; i++) {
+      const t = (i - 2) / 2;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.5 - Math.abs(t) * 0.15, 1.6 + (1 - Math.abs(t)) * 1.1, 5), dark);
+      spike.position.set(0, 1.7 - Math.abs(t) * 0.4, -0.2 + t * 1.6);
+      spike.rotation.x = -0.2 + t * 0.25;
+      this.root.add(spike);
+      // flanking smaller spikes
+      for (const s of [-1, 1]) {
+        const sp = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.9, 4), shell);
+        sp.position.set(s * (1.3 + Math.abs(t) * 0.3), 1.1 - Math.abs(t) * 0.3, -0.2 + t * 1.5);
+        sp.rotation.x = -0.2; sp.rotation.z = s * 0.5;
+        this.root.add(sp);
+      }
+    }
+
+    // deep-set predator eyes under a heavy brow
+    this.eyes = [];
+    const brow = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.5, 0.8), dark);
+    brow.position.set(0, 1.75, -2.0); brow.rotation.x = 0.25;
+    this.root.add(brow);
+    for (const s of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.26, 0.34),
         new THREE.MeshBasicMaterial({ color: '#ff2e3f' }));
-      eye.position.set(s * 1.1, 1.6, -2.1);
-      eye.rotation.z = -s * 0.28;
+      eye.position.set(s * 1.15, 1.45, -2.25);
+      eye.rotation.z = -s * 0.32;
       this.root.add(eye);
       this.eyes.push({ eye });
     }
 
-    // claws
+    // claws: heavy tapered arm + an open two-prong pincer
     this.claws = [];
     for (const s of [-1, 1]) {
       const armG = new THREE.Group();
-      armG.position.set(s * 2.9, 0.4, -1.4);
+      armG.position.set(s * 3.0, 0.3, -1.4);
       this.root.add(armG);
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 2.2), dark);
-      arm.position.z = -1.0;
+      const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.85, 8, 6), dark);
+      armG.add(shoulder);
+      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.85, 2.6, 7), dark);
+      arm.rotation.x = Math.PI / 2; arm.position.z = -1.2;
       armG.add(arm);
-      const claw = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.5, 2.3), shell);
-      claw.position.z = -2.6;
-      claw.castShadow = true;
-      armG.add(claw);
-      const pincer = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 1.6), dark);
-      pincer.position.set(0, 0.85, -2.9);
-      armG.add(pincer);
+      // knuckle
+      const knuckle = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.7, 1.9), shell);
+      knuckle.position.z = -2.7; knuckle.castShadow = true;
+      armG.add(knuckle);
+      // upper + lower pincer prongs (tapered, with a gap = looks like it can grab)
+      const upper = new THREE.Mesh(new THREE.ConeGeometry(0.55, 2.6, 5), shell);
+      upper.rotation.x = -Math.PI / 2; upper.position.set(0, 0.55, -4.0);
+      armG.add(upper);
+      const lower = new THREE.Mesh(new THREE.ConeGeometry(0.5, 2.3, 5), dark);
+      lower.rotation.x = -Math.PI / 2; lower.position.set(0, -0.5, -3.9);
+      armG.add(lower);
       this.claws.push(armG);
     }
 
-    // legs: 3 stubs per side
+    // legs: 3 jointed limbs per side (upper thigh angled out, lower angled down)
     this.legMeshes = [];
     for (const s of [-1, 1]) {
       for (let i = 0; i < 3; i++) {
-        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.55, 1.9, 0.55), dark);
-        leg.position.set(s * 3.0, -1.5, -1.2 + i * 1.3);
-        leg.rotation.z = s * 0.5;
-        this.root.add(leg);
-        this.legMeshes.push(leg);
+        const legG = new THREE.Group();
+        legG.position.set(s * 2.6, -0.4, -1.4 + i * 1.4);
+        const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.3, 2.0, 6), dark);
+        thigh.rotation.z = s * 1.0; thigh.position.set(s * 0.8, -0.3, 0);
+        legG.add(thigh);
+        const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.12, 2.4, 6), dark);
+        shin.position.set(s * 1.7, -1.4, 0); shin.rotation.z = s * 0.25;
+        legG.add(shin);
+        const foot = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.7, 5), shell);
+        foot.position.set(s * 1.95, -2.5, 0);
+        legG.add(foot);
+        this.root.add(legG);
+        this.legMeshes.push(legG);
       }
     }
 

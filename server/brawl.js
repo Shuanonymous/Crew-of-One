@@ -30,8 +30,9 @@ export class BrawlGame {
     this.nextId = 1;
 
     this.time = 0;            // seconds survived — THE danger clock
-    this.spawnPoints = 0;     // spawner wallet
-    this.graceT = 8;          // a breath before the first spawns
+    // test hook: seed the spawn wallet so a monster appears at once (QA)
+    this.spawnPoints = Number(process.env.COO_TEST_SPAWN) || 0;
+    this.graceT = process.env.COO_TEST_SPAWN ? 0 : 8; // a breath before the first spawns
     this.bossSpawned = new Set();
     this.credits = Number(process.env.COO_TEST_CREDITS) || 0;
     this.creditsEarned = 0;
