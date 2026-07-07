@@ -1540,34 +1540,49 @@ class SpitterView {
     this.scene = scene;
     this.root = new THREE.Group();
     scene.add(this.root);
-    const skin = new THREE.MeshLambertMaterial({ color: '#7aa843' });
-    const belly = new THREE.MeshLambertMaterial({ color: '#c9e07a' });
-    const dark = new THREE.MeshLambertMaterial({ color: '#4a6b28' });
+    const skin = new THREE.MeshLambertMaterial({ color: '#5f7a2e', flatShading: true });
+    const belly = new THREE.MeshLambertMaterial({ color: '#b6c96a', flatShading: true });
+    const dark = new THREE.MeshLambertMaterial({ color: '#38501c' });
     this.flashMats = [skin, belly, dark];
 
-    const body = new THREE.Mesh(new THREE.SphereGeometry(2.6, 10, 8), skin);
-    body.scale.set(1.15, 0.8, 1.1);
+    // warty low-poly bulk
+    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(2.5, 1), skin);
+    body.scale.set(1.2, 0.82, 1.05);
     body.castShadow = true;
     this.root.add(body);
-    this.throat = new THREE.Mesh(new THREE.SphereGeometry(1.5, 10, 8), belly);
-    this.throat.position.set(0, -0.6, -1.6);
+    // a distended acid-sac throat that inflates before it spits
+    this.throat = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 1), belly);
+    this.throat.position.set(0, -0.5, -1.7);
     this.root.add(this.throat);
-    this.snout = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 1.0, 2.2, 8), dark);
+    // gaping maw (wide cone) it fires through
+    this.snout = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 1.25, 2.0, 7), dark);
     this.snout.rotation.x = Math.PI / 2.4;
-    this.snout.position.set(0, 0.9, -2.2);
+    this.snout.position.set(0, 0.85, -2.2);
     this.root.add(this.snout);
+    // knobbly warts scattered across the back
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2;
+      const wart = new THREE.Mesh(new THREE.IcosahedronGeometry(0.3 + (i % 3) * 0.12, 0), dark);
+      wart.position.set(Math.cos(a) * 1.7, 1.2 + Math.sin(i) * 0.5, Math.sin(a) * 1.3 + 0.2);
+      this.root.add(wart);
+    }
     for (const s of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 8),
-        new THREE.MeshBasicMaterial({ color: '#ff2e3f' }));
-      eye.position.set(s * 1.2, 1.6, -1.2);
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6),
+      // bulging asymmetric eyes on stalks
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 8),
+        new THREE.MeshBasicMaterial({ color: '#d3ff4d' }));
+      eye.position.set(s * 1.15, 1.7, -1.1);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.26, 8, 6),
         new THREE.MeshLambertMaterial({ color: '#1d2033' }));
-      pupil.position.z = -0.34;
+      pupil.position.z = -0.4;
       eye.add(pupil);
       this.root.add(eye);
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.4, 0.8), dark);
-      leg.position.set(s * 2.2, -1.8, 0.5);
-      this.root.add(leg);
+      // splayed webbed legs (thigh + foot)
+      const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 1.5, 6), dark);
+      thigh.position.set(s * 2.1, -1.3, 0.4); thigh.rotation.z = s * 0.6;
+      this.root.add(thigh);
+      const foot = new THREE.Mesh(new THREE.ConeGeometry(0.7, 0.5, 4), skin);
+      foot.rotation.x = -Math.PI / 2; foot.position.set(s * 2.7, -1.9, -0.1);
+      this.root.add(foot);
     }
     this.bar = makeHpBar(scene);
     this.flashT = 0;
@@ -1609,42 +1624,64 @@ class FlyerView {
     this.scene = scene;
     this.root = new THREE.Group();
     scene.add(this.root);
-    const grey = new THREE.MeshLambertMaterial({ color: '#d8d3c8' });
-    const dark = new THREE.MeshLambertMaterial({ color: '#8f8878' });
-    this.flashMats = [grey, dark];
+    // a leathery wyvern, not a gull: sinewy body, membrane wings, barbed tail
+    const hide = new THREE.MeshLambertMaterial({ color: '#6b5240', flatShading: true });
+    const membrane = new THREE.MeshLambertMaterial({ color: '#3a2b22', flatShading: true, side: THREE.DoubleSide });
+    const dark = new THREE.MeshLambertMaterial({ color: '#241a14' });
+    this.flashMats = [hide, membrane, dark];
 
-    const body = new THREE.Mesh(new THREE.SphereGeometry(1.7, 10, 8), grey);
-    body.scale.set(0.9, 0.8, 1.6);
+    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 1), hide);
+    body.scale.set(0.85, 0.8, 1.7);
     body.castShadow = true;
     this.root.add(body);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.9, 10, 8), grey);
-    head.position.set(0, 0.5, -2.3);
+    // neck sweeping forward to a horned head
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.75, 1.9, 7), hide);
+    neck.position.set(0, 0.55, -1.7); neck.rotation.x = 1.15;
+    this.root.add(neck);
+    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.72, 0), hide);
+    head.scale.set(0.9, 0.8, 1.3);
+    head.position.set(0, 0.95, -2.7);
     this.root.add(head);
-    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.6, 6),
-      new THREE.MeshLambertMaterial({ color: '#f2a65a' }));
-    beak.rotation.x = -Math.PI / 2;
-    beak.position.set(0, 0.4, -3.6);
-    this.root.add(beak);
+    const jaw = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.4, 5), dark);
+    jaw.rotation.x = -Math.PI / 2; jaw.position.set(0, 0.75, -3.6);
+    this.root.add(jaw);
     for (const s of [-1, 1]) {
-      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.14, 0.16),
-        new THREE.MeshLambertMaterial({ color: '#1d2033' }));
-      brow.position.set(s * 0.5, 1.05, -2.6);
-      brow.rotation.z = -s * 0.5;
-      this.root.add(brow);
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6),
-        new THREE.MeshBasicMaterial({ color: '#ff2e3f' }));
-      eye.position.set(s * 0.5, 0.75, -2.7);
+      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.9, 5), dark);
+      horn.position.set(s * 0.35, 1.5, -2.5); horn.rotation.z = s * 0.4; horn.rotation.x = -0.5;
+      this.root.add(horn);
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6),
+        new THREE.MeshBasicMaterial({ color: '#ff8a1e' }));
+      eye.position.set(s * 0.42, 1.05, -3.0);
       this.root.add(eye);
     }
+    // barbed tail: tapering segments trailing behind
+    for (let i = 0; i < 4; i++) {
+      const seg = new THREE.Mesh(new THREE.ConeGeometry(0.4 - i * 0.08, 1.1, 6), hide);
+      seg.rotation.x = Math.PI / 2; seg.position.set(0, 0.15 + i * 0.05, 1.6 + i * 0.95);
+      this.root.add(seg);
+    }
+    const barb = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1.0, 4), dark);
+    barb.rotation.x = -Math.PI / 2; barb.position.set(0, 0.35, 5.6);
+    this.root.add(barb);
+    // membrane wings: leading-edge bone + finger struts + a stretched membrane,
+    // all on a group that pivots at the shoulder so the flap still works
     this.wings = [];
     for (const s of [-1, 1]) {
-      const wing = new THREE.Mesh(new THREE.BoxGeometry(0.32, 1.2, 4.6), dark);
-      wing.geometry.translate(0, 0, 0);
       const g = new THREE.Group();
-      g.position.set(s * 1.5, 0.4, 0);
-      wing.position.set(s * 1.6, 0, 0.3);
-      wing.rotation.y = s * 0.25;
-      g.add(wing);
+      g.position.set(s * 1.0, 0.5, -0.3);
+      const bone = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.1, 4.6, 6), dark);
+      bone.rotation.z = Math.PI / 2; bone.position.set(s * 2.3, 0, 0);
+      g.add(bone);
+      const mem = new THREE.Mesh(new THREE.ConeGeometry(2.4, 4.4, 3), membrane);
+      mem.rotation.z = s * Math.PI / 2; mem.rotation.y = Math.PI; mem.scale.set(1, 1, 0.08);
+      mem.position.set(s * 2.2, -0.1, 0.7);
+      g.add(mem);
+      for (let f = 0; f < 3; f++) {
+        const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.05, 3.0, 5), dark);
+        strut.position.set(s * (1.2 + f * 1.0), -0.3, 0.9);
+        strut.rotation.x = -0.5; strut.rotation.z = s * 0.2;
+        g.add(strut);
+      }
       this.root.add(g);
       this.wings.push({ g, s });
     }
