@@ -15,7 +15,7 @@ const V3 = THREE.Vector3;
 // The run is a journey: sunset -> dusk -> neon night -> dawn, per wave.
 const PALETTES = [
   { name: 'nightrain', sky: ['#0a0d1c', '#141833', '#252048', '#3a2a5e'], fog: '#1d1b33',
-    hemi: ['#7d8fc9', '#1d1a33'], sun: '#8fa3d9', sunI: 1.1, sunPos: [-60, 50, -40], amb: 0.85, sunDisc: '#dfe6ff' },
+    hemi: ['#9fb0e0', '#26223f'], sun: '#bcd0ff', sunI: 2.0, sunPos: [-60, 60, -35], amb: 1.35, sunDisc: '#dfe6ff' },
   { name: 'sunset', sky: ['#5d7ec9', '#9b8fd4', '#f2a08a', '#f9c46b'], fog: '#e89a80',
     hemi: ['#ffe8c9', '#6b5d8f'], sun: '#ffc27d', sunI: 2.2, sunPos: [80, 38, 30], amb: 1.0, sunDisc: '#ffd9a0' },
   { name: 'dusk', sky: ['#2c2a5e', '#5d4a8f', '#b0628f', '#e8896b'], fog: '#8f5a7a',
@@ -61,9 +61,14 @@ export class Renderer {
     this.sun.shadow.camera.far = 400;
     this.scene.add(this.sun);
     // cool rim light from behind so the mech pops off the sky
-    this.rim = new THREE.DirectionalLight('#8aa5ff', 0.7);
+    this.rim = new THREE.DirectionalLight('#8aa5ff', 1.25);
     this.rim.position.set(-50, 35, -60);
     this.scene.add(this.rim);
+    // warm fill from the opposite side — cinematic two-tone key/rim so the
+    // hull never flattens into a silhouette (cool moon vs warm sodium glow)
+    this.fill = new THREE.DirectionalLight('#ffb87a', 0.55);
+    this.fill.position.set(55, 26, 45);
+    this.scene.add(this.fill);
 
     // giant low sun/moon disc (blooms nicely)
     this.sunDisc = new THREE.Mesh(
@@ -488,6 +493,11 @@ export class Renderer {
       g.add(mesh);
     }
 
+    // ---- war damage: a kaiju has been through here. Broken rooflines,
+    // rubble mounds, exposed rebar, scattered debris. All merged into a
+    // few meshes so the destruction costs almost nothing to draw. ----
+    this.buildDamage(g, world);
+
     // endless-run interactables
     this.beaconViews = [];
     for (const b of []) { // beacons removed — endless buys anywhere
@@ -600,6 +610,85 @@ export class Renderer {
       car.add(body, cabin);
       g.add(car);
       this.propMeshes.set(d.id, car);
+    }
+  }
+
+  // Battle-damage the district: broken tops, rubble, rebar, debris fields.
+  // Deterministic per building position so every client sees the same ruin.
+  buildDamage(g, world) {
+    const concrete = [];   // grey chunks (rubble, broken slabs)
+    const rebarGeos = [];  // thin rusty bars poking out of the wreckage
+    const emberChunks = []; // still-glowing hot debris
+    const pushBox = (arr, w, h, dd, x, y, z, rx = 0, ry = 0, rz = 0) => {
+      const b = new THREE.BoxGeometry(w, h, dd);
+      if (rx || ry || rz) { b.rotateX(rx); b.rotateY(ry); b.rotateZ(rz); }
+      b.translate(x, y, z);
+      arr.push(b);
+    };
+    const buildings = (world.city || []).filter((d) => d.kind === 'building');
+    for (const d of buildings) {
+      const h = hashStr('dmg' + d.p[0] + '_' + d.p[2]);
+      const rng = mulberry32(h);
+      const [w, bh, dp] = d.size;
+      const topY = d.p[1] + bh / 2;
+      // ~55% of buildings are visibly wrecked
+      if (h % 100 < 55) {
+        // broken, jagged roofline: uneven concrete teeth around the top edge
+        const teeth = 3 + (h % 4);
+        for (let i = 0; i < teeth; i++) {
+          const tw = w * (0.18 + rng() * 0.22);
+          const th = 1.5 + rng() * (bh * 0.14);
+          const ex = (rng() - 0.5) * (w - tw);
+          const ez = (rng() - 0.5) * (dp - tw);
+          pushBox(concrete, tw, th, tw, d.p[0] + ex, topY + th / 2 - 0.4, d.p[2] + ez, 0, rng() * 0.6, (rng() - 0.5) * 0.25);
+          if (rng() < 0.5) pushBox(rebarGeos, 0.08, th * 1.5, 0.08, d.p[0] + ex, topY + th * 0.9, d.p[2] + ez, (rng() - 0.5) * 0.4, 0, (rng() - 0.5) * 0.4);
+        }
+        // gouged blast scar partway up the facade (a dark recessed chunk)
+        if (h % 3 === 0 && bh > 16) {
+          const sy = d.p[1] + (rng() - 0.3) * bh * 0.4;
+          pushBox(concrete, w * 0.3, bh * 0.16, 1.2, d.p[0] + (rng() - 0.5) * w * 0.4, sy, d.p[2] + dp / 2, 0, 0, (rng() - 0.5) * 0.3);
+        }
+      }
+      // rubble mound at the base for most buildings
+      if (h % 100 < 62) {
+        const chunks = 3 + (h % 5);
+        for (let i = 0; i < chunks; i++) {
+          const cw = 1.2 + rng() * 2.6;
+          const ch = 0.8 + rng() * 1.8;
+          const a = rng() * Math.PI * 2;
+          const rad = (Math.max(w, dp) / 2) + 0.5 + rng() * 3;
+          const rx = d.p[0] + Math.cos(a) * rad;
+          const rz = d.p[2] + Math.sin(a) * rad;
+          pushBox(concrete, cw, ch, cw * (0.7 + rng() * 0.6), rx, ch / 2, rz, (rng() - 0.5) * 0.5, rng() * Math.PI, (rng() - 0.5) * 0.5);
+          if (rng() < 0.25) pushBox(emberChunks, 0.5, 0.5, 0.5, rx, 0.3, rz);
+        }
+      }
+    }
+    // scattered debris field across open ground (deterministic global seed)
+    const grng = mulberry32(90210);
+    for (let i = 0; i < 60; i++) {
+      const x = (grng() - 0.5) * 300;
+      const z = (grng() - 0.5) * 300;
+      if (Math.hypot(x, z) < 22) continue; // keep spawn plaza clearer
+      const cw = 0.8 + grng() * 2.2;
+      const ch = 0.5 + grng() * 1.2;
+      pushBox(concrete, cw, ch, cw, x, ch / 2, z, (grng() - 0.5) * 0.4, grng() * Math.PI, (grng() - 0.5) * 0.4);
+    }
+    const cMat = new THREE.MeshStandardMaterial({ color: '#4a4854', metalness: 0.1, roughness: 0.95, flatShading: true });
+    if (concrete.length) {
+      const m = new THREE.Mesh(mergeGeometries(concrete), cMat);
+      m.castShadow = m.receiveShadow = true; g.add(m);
+    }
+    if (rebarGeos.length) {
+      const m = new THREE.Mesh(mergeGeometries(rebarGeos),
+        new THREE.MeshStandardMaterial({ color: '#6e4a34', metalness: 0.8, roughness: 0.6 }));
+      g.add(m);
+    }
+    if (emberChunks.length) {
+      const m = new THREE.Mesh(mergeGeometries(emberChunks),
+        new THREE.MeshStandardMaterial({ color: '#2a0f04', emissive: new THREE.Color('#ff5a1e'), emissiveIntensity: 1.4, roughness: 0.9 }));
+      g.add(m);
+      this.emberDebris = m;
     }
   }
 
@@ -889,91 +978,131 @@ class MechView {
     this.root = new THREE.Group();
     scene.add(this.root);
 
-    // PBR brushed-metal armour with worn edges + emissive cockpit strips
-    const main = new THREE.MeshStandardMaterial({ color, metalness: 0.85, roughness: 0.45 });
-    const dark = new THREE.MeshStandardMaterial({ color: '#2b2d42', metalness: 0.9, roughness: 0.35 });
-    const trim = new THREE.MeshStandardMaterial({ color: '#0a0d18', metalness: 0.7, roughness: 0.3, emissive: new THREE.Color('#2ad4ff'), emissiveIntensity: 1.4 });
+    // ---- authored PBR materials: painted gunmetal hull, dark joints,
+    // chromed pistons, glowing reactor accents ----
+    const hull = new THREE.Color(color).multiplyScalar(0.92); // painted gunmetal
+    const main = new THREE.MeshStandardMaterial({ color: hull, metalness: 0.75, roughness: 0.42, envMapIntensity: 1.1 });
+    const plate = new THREE.MeshStandardMaterial({ color: new THREE.Color(color).multiplyScalar(0.7), metalness: 0.85, roughness: 0.34, envMapIntensity: 1.2 });
+    const dark = new THREE.MeshStandardMaterial({ color: '#2b2f3d', metalness: 0.9, roughness: 0.3, envMapIntensity: 1.1 });
+    const piston = new THREE.MeshStandardMaterial({ color: '#d6dae4', metalness: 1.0, roughness: 0.14, envMapIntensity: 1.4 });
+    const trim = new THREE.MeshStandardMaterial({ color: '#0a0d18', metalness: 0.5, roughness: 0.3, emissive: new THREE.Color('#3fe6ff'), emissiveIntensity: 3.2 });
+    const hazard = new THREE.MeshStandardMaterial({ color: '#1a1206', metalness: 0.6, roughness: 0.5, emissive: new THREE.Color('#ff8a1e'), emissiveIntensity: 1.8 });
     this.mats = { main, dark, trim };
 
-    // torso
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(4.2, 5.6, 2.8), main);
-    torso.castShadow = true;
-    this.root.add(torso);
-    const chest = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.2, 0.4), trim);
-    chest.position.set(0, 0.9, -1.5);
-    this.root.add(chest);
-    const vents = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.9, 0.3), dark);
-    vents.position.set(0, -1.6, -1.45);
-    this.root.add(vents);
+    // helper: add a mesh at (x,y,z) with optional rotation + shadow
+    const P = (parent, geo, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z); m.rotation.set(rx, ry, rz);
+      m.castShadow = true; m.receiveShadow = true;
+      parent.add(m); return m;
+    };
+    const bevel = (w, h, d) => new THREE.BoxGeometry(w, h, d); // (kept simple for perf)
 
-    // shoulder pads
-    for (const side of [-1, 1]) {
-      const pad = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.6, 2.4), dark);
-      pad.position.set(side * 2.9, 2.4, 0);
-      pad.castShadow = true;
-      this.root.add(pad);
+    // ================= TORSO =================
+    // tapered core (wider shoulders, narrow waist) built from stacked plates
+    P(this.root, new THREE.CylinderGeometry(2.5, 1.9, 3.4, 8), main, 0, 0.9, 0);   // upper chest drum
+    P(this.root, bevel(3.0, 1.6, 2.2), plate, 0, 1.6, -0.2);                        // chest plate
+    P(this.root, bevel(1.8, 1.9, 1.8), dark, 0, -1.8, 0);                           // waist block
+    P(this.root, bevel(2.6, 0.5, 2.2), plate, 0, -0.9, 0);                          // belt
+    // angled pectoral plates
+    for (const s of [-1, 1]) P(this.root, bevel(1.3, 1.5, 0.5), plate, s * 0.85, 1.5, -1.15, 0.2, 0, -s * 0.25);
+    // glowing reactor core in the chest
+    P(this.root, new THREE.CylinderGeometry(0.55, 0.55, 0.4, 12), trim, 0, 0.9, -1.35, Math.PI / 2, 0, 0);
+    // back thruster pods
+    for (const s of [-1, 1]) {
+      P(this.root, new THREE.CylinderGeometry(0.5, 0.62, 2.2, 8), dark, s * 1.1, 1.2, 1.4);
+      P(this.root, new THREE.CylinderGeometry(0.45, 0.45, 0.3, 8), hazard, s * 1.1, 0.1, 1.5);
+    }
+    // side exhaust vents
+    for (const s of [-1, 1]) for (let i = 0; i < 3; i++)
+      P(this.root, bevel(0.3, 0.16, 1.4), hazard, s * 1.65, 0.5 - i * 0.45, -0.3);
+
+    // ================= SHOULDERS (layered pauldrons) =================
+    for (const s of [-1, 1]) {
+      const sh = new THREE.Group();
+      sh.position.set(s * 2.75, 2.15, 0);
+      this.root.add(sh);
+      P(sh, bevel(2.1, 1.7, 2.6), plate, 0, 0, 0);                 // main pauldron
+      P(sh, bevel(2.3, 0.6, 2.8), dark, 0, 0.85, 0);               // top ridge
+      P(sh, bevel(0.5, 1.3, 2.2), main, s * 1.0, -0.1, 0, 0, 0, -s * 0.3); // outer flare
+      P(sh, new THREE.CylinderGeometry(0.18, 0.18, 2.4, 6), piston, 0, -0.2, 0, Math.PI / 2, 0, 0); // rivet bar
+      P(sh, bevel(0.4, 0.4, 0.4), trim, 0, 0.4, -1.4);             // marker light
     }
 
-    // head: visor + one BIG eye that charges up
+    // ================= HEAD (angular, T-visor) =================
     this.head = new THREE.Group();
-    this.head.position.set(0, 3.9, 0);
+    this.head.position.set(0, 3.35, -0.1);
     this.root.add(this.head);
-    const skull = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.7, 1.9), main);
-    skull.castShadow = true;
-    this.head.add(skull);
-    const visor = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.75, 0.3), dark);
-    visor.position.set(0, 0.12, -0.95);
-    this.head.add(visor);
-    this.eye = new THREE.Mesh(
-      new THREE.SphereGeometry(0.34, 12, 10),
-      new THREE.MeshBasicMaterial({ color: '#c78bd6' })
-    );
-    this.eye.position.set(0, 0.12, -1.05);
+    P(this.head, new THREE.CylinderGeometry(0.95, 1.15, 1.5, 6), main, 0, 0, 0);   // faceted skull
+    P(this.head, bevel(1.9, 0.7, 0.4), dark, 0, 0.1, -0.85);                        // brow
+    P(this.head, bevel(0.9, 0.55, 0.4), plate, 0, -0.55, -0.7);                     // chin guard
+    // side "ear" comms blocks
+    for (const s of [-1, 1]) P(this.head, bevel(0.35, 0.7, 0.7), dark, s * 1.0, 0, 0.1);
+    // the eye: a horizontal T-visor slit (emissive; charges up)
+    this.eye = new THREE.Mesh(bevel(1.35, 0.32, 0.18), new THREE.MeshBasicMaterial({ color: '#7fe9ff' }));
+    this.eye.position.set(0, -0.05, -0.92);
     this.head.add(this.eye);
-    // rigid blade antenna with a slow-blinking warning light (not a bobble —
-    // this thing is a weapons platform, not a toy)
-    const antenna = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.4, 0.28), dark);
-    antenna.position.set(0.7, 1.4, 0);
-    this.head.add(antenna);
-    this.blinker = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8),
+    // swept crest fin
+    P(this.head, bevel(0.16, 0.9, 1.1), plate, 0, 0.7, 0.2, -0.5, 0, 0);
+    // blinking sensor light (kept as the ragdoll/charge indicator)
+    this.blinker = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8),
       new THREE.MeshBasicMaterial({ color: '#ff4d5e' }));
-    this.blinker.position.set(0.7, 2.15, 0);
+    this.blinker.position.set(0.62, 0.55, 0.2);
     this.head.add(this.blinker);
 
-    // legs
+    // ================= LEGS (digitigrade, actuated) =================
     this.legs = [];
     for (const side of [-1, 1]) {
       const hip = new THREE.Group();
-      hip.position.set(side * 1.25, -2.8, 0);
+      hip.position.set(side * 1.2, -2.6, 0);
       this.root.add(hip);
-      const thigh = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2.6, 1.7), dark);
-      thigh.position.y = -1.3;
-      thigh.castShadow = true;
-      hip.add(thigh);
+      P(hip, new THREE.SphereGeometry(0.7, 10, 8), dark, 0, 0, 0);                 // hip ball
+      P(hip, new THREE.CylinderGeometry(0.9, 0.75, 2.4, 6), main, 0, -1.3, 0);     // thigh armor
+      P(hip, bevel(0.5, 1.8, 0.5), plate, side * 0.7, -1.3, 0.1);                  // thigh side plate
+      P(hip, new THREE.CylinderGeometry(0.12, 0.12, 2.0, 6), piston, side * 0.35, -1.3, 0.55); // hydraulic rod
+
       const shinG = new THREE.Group();
       shinG.position.y = -2.6;
       hip.add(shinG);
-      const shin = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.2, 1.4), main);
-      shin.position.y = -1.1;
-      shin.castShadow = true;
-      shinG.add(shin);
-      const foot = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.8, 2.6), dark);
-      foot.position.set(0, -2.4, -0.35);
-      foot.castShadow = true;
-      shinG.add(foot);
+      P(shinG, new THREE.SphereGeometry(0.5, 8, 8), piston, 0, 0.1, 0);            // knee actuator
+      P(shinG, bevel(0.3, 0.9, 0.3), piston, 0, 0.55, 0.4);                        // knee piston
+      P(shinG, new THREE.CylinderGeometry(0.7, 0.55, 2.2, 6), main, 0, -1.1, 0);   // shin
+      P(shinG, bevel(1.0, 1.4, 0.4), plate, 0, -1.0, -0.55);                       // shin guard
+      // splayed foot with toe plates + heel
+      P(shinG, bevel(1.5, 0.5, 2.4), dark, 0, -2.3, -0.2);                         // foot base
+      P(shinG, bevel(1.5, 0.35, 0.7), plate, 0, -2.15, -1.5);                      // toe
+      P(shinG, bevel(1.0, 0.5, 0.6), dark, 0, -2.3, 1.0);                          // heel spur
       this.legs.push({ hip, shinG, side });
     }
     this.walkPhase = 0;
 
-    // arms: world-space segments (shoulder -> elbow -> fist)
+    // ================= ARMS =================
+    // Segments stretch dramatically as the fist rockets out on a punch
+    // (up to ~8u reach), so they are single tubular meshes that scale
+    // cleanly along Y. The chrome forearm reads as an extending hydraulic
+    // ram; nested concentric sleeves add read-through detail without
+    // distorting under stretch. All the sculpted detail lives in the
+    // fist (positioned + uniformly scaled) and the elbow actuator.
     this.arms = {};
     for (const side of ['L', 'R']) {
       const s = side === 'L' ? -1 : 1;
-      const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.55, 1), dark);
-      const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.5, 1), main);
-      const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.66, 10, 8), dark);
-      const fist = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.7, 1.7), trim);
-      upper.castShadow = fore.castShadow = fist.castShadow = true;
+      // upper arm: armored cylinder with a concentric cable sleeve
+      const upper = new THREE.Group();
+      P(upper, new THREE.CylinderGeometry(0.5, 0.44, 1, 10), main, 0, 0, 0);
+      P(upper, new THREE.CylinderGeometry(0.6, 0.58, 0.28, 10), plate, 0, 0.34, 0); // shoulder cuff (stays tubular)
+      // forearm: chromed piston ram + a darker outer housing at the elbow end
+      const fore = new THREE.Group();
+      P(fore, new THREE.CylinderGeometry(0.36, 0.34, 1, 10), piston, 0, 0, 0);      // bright ram core
+      P(fore, new THREE.CylinderGeometry(0.52, 0.4, 0.5, 10), main, 0, 0.28, 0);    // forearm housing (elbow side)
+      P(fore, new THREE.CylinderGeometry(0.4, 0.46, 0.22, 10), dark, 0, -0.42, 0);  // wrist collar (fist side)
+      const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.6, 12, 10), piston);
+      // fist: knuckle block + finger plates + emissive energy core
+      const fist = new THREE.Group();
+      P(fist, bevel(1.5, 1.3, 1.5), plate, 0, 0, 0);
+      P(fist, bevel(1.62, 0.5, 1.62), dark, 0, 0.45, 0);       // knuckle ridge
+      for (let k = -1; k <= 1; k++) P(fist, bevel(0.4, 0.55, 0.95), main, k * 0.45, 0.55, -0.35); // fingers
+      P(fist, bevel(0.55, 0.9, 0.55), dark, 0, -0.2, 0.7);     // thumb
+      P(fist, bevel(0.85, 0.32, 0.32), trim, 0, 0, -0.78);     // energy knuckleduster
       scene.add(upper, fore, elbow, fist);
       this.arms[side] = { s, upper, fore, elbow, fist, pos: new V3() };
     }
