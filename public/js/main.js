@@ -3,11 +3,16 @@ import { Input } from '/js/input.js';
 import { Renderer } from '/js/render.js';
 import { sfx } from '/js/sfx.js';
 import { music } from '/js/music.js';
-import { ROLE, MODES, PHASE, SHOP, roleTitle, MECH } from '/shared/constants.js';
+import { ROLE, MODES, PHASE, SHOP, MSG, roleTitle, MECH } from '/shared/constants.js';
 
 function audioOn() {
-  sfx.unlock();
-  if (sfx.ctx) music.start(sfx.ctx, sfx.master);
+  if (window.__COO_NO_AUDIO) return; // E2E: avoid AudioContext limits across reloads
+  // never let an audio failure (blocked autoplay, AudioContext limits,
+  // privacy modes) break a UI action like creating a room
+  try {
+    sfx.unlock();
+    if (sfx.ctx) music.start(sfx.ctx, sfx.master);
+  } catch (e) { console.warn('audio unavailable:', e.message); }
 }
 
 // App flow: TITLE -> LOBBY -> GAME (hud + shop + end overlays) -> LOBBY...
@@ -33,6 +38,7 @@ const state = {
   lastWave: 0,
   lastCredits: 0,
   shopOpen: false,
+  shopManual: false,
   endShown: false,
   lastHp: -1,
 };
@@ -192,6 +198,7 @@ net.onGameStart = (msg) => {
   updateRoleBanner();
   $('wave-pill').classList.toggle('hidden', !isBrawlLike(msg.mode));
   $('credits-pill').classList.toggle('hidden', !isBrawlLike(msg.mode));
+  $('btn-upgrades').classList.toggle('hidden', msg.mode !== MODES.BRAWL);
   $('duel-hp-wrap').classList.toggle('hidden', msg.mode !== MODES.DUEL);
   $('objectives').classList.toggle('hidden', msg.mode !== MODES.TRAINING);
   $('laser-wrap').classList.add('hidden');
@@ -308,6 +315,10 @@ function handleEvents(snap) {
         case 'dmgNum': dmgNumber(ev.p, ev.dmg, ev.laser ? 'laser' : ev.dmg >= 30 ? 'big' : ''); if (ev.laser) sfx.ping(); break;
         case 'dash': sfx.whoosh(); renderer.ring(mech.p, '#8aa5ff', 10, 0.4); break;
         case 'turretFire': sfx.click(); if (ev.to) renderer.burst(ev.to, '#ffd166', 3, 8); break;
+        case 'cannonFire': sfx.click(); renderer.shake(0.05); if (ev.p) renderer.muzzle(ev.p, '#fff2c0', 1.6); break;
+        case 'podFire': sfx.rocket(); if (ev.p) { renderer.muzzle(ev.p, '#ffca8a', 2.2); renderer.smoke(ev.p); } break;
+        case 'podHit': sfx.clang(1.4); renderer.shake(0.5); hitstop(70); if (ev.p) { renderer.muzzle(ev.p, '#ffd08a', 3.5); renderer.ring(ev.p, '#ff7b4d', 12, 0.5); renderer.burst(ev.p, '#ff7b4d', 22, 18); renderer.smoke(ev.p); renderer.smoke(ev.p); renderer.scorch(ev.p, 3); } break;
+        case 'podReload': break;
       }
     }
   }
@@ -377,14 +388,21 @@ function updateHud(snap) {
       $('credits-pill').textContent = '© ' + snap.credits;
       $('shop-credits').textContent = snap.credits;
     }
-    // Classic: safe between-wave shop. Endless: proximity beacon shop.
-    if (snap.shopOpen && state.screen === 'game') {
+    // Classic auto-opens between waves. Endless is buy-anywhere via the UPGRADES button or B.
+    const classicShop = state.mode === MODES.CLASSIC && snap.shopOpen;
+    const endlessShop = state.mode === MODES.BRAWL && state.shopManual;
+    if ((classicShop || endlessShop) && state.screen === 'game') {
       show('shop');
-      renderShopItems(snap);
-    } else if (!snap.shopOpen && state.screen === 'shop') {
+      state.shopKey = null;
+    } else if (state.screen === 'shop' && !classicShop && !endlessShop) {
       show('game');
-    } else if (snap.shopOpen) {
-      renderShopItems(snap);
+    }
+    // REBUILD ONLY ON CHANGE. Rebuilding the button list every 50ms snapshot
+    // destroyed the node between mousedown and mouseup, so clicks never
+    // registered — the production shop bug. Guarded by e2e-shop.test.js.
+    if (state.screen === 'shop') {
+      const key = JSON.stringify([snap.credits, snap.prices, mine.up]);
+      if (key !== state.shopKey) { state.shopKey = key; renderShopItems(snap); }
     }
   }
 
@@ -470,16 +488,40 @@ function renderShopItems(snap) {
     btn.disabled = owned || (snap && snap.credits < price);
     btn.innerHTML = `<b>${item.name}${tier}</b><span class="si-desc">${item.desc}</span>
       <span class="si-price">${owned ? 'INSTALLED ✓' : '© ' + price}</span>`;
-    btn.onclick = () => { sfx.click(); net.send({ t: 'buy', item: item.id }); };
+    btn.onpointerdown = (e) => { e.preventDefault(); sfx.click(); net.send({ t: 'buy', item: item.id }); };
     wrap.appendChild(btn);
   }
-  $('shop-title').textContent = state.mode === MODES.CLASSIC ? '🛠 WAVE CLEARED — UPGRADE BAY' : '📡 SUPPLY BEACON';
-  $('shop-sub').textContent = state.mode === MODES.CLASSIC ? 'Safe shop: spend shared credits, then the host clicks READY for the next wave.' : 'Field shop: anyone can spend shared credits. Monsters do not wait.';
-  $('btn-shop-done').classList.toggle('hidden', !(state.mode === MODES.CLASSIC && state.isHost));
-  $('btn-shop-done').textContent = state.mode === MODES.CLASSIC ? 'READY FOR NEXT WAVE →' : 'NEXT WAVE →';
-  $('shop-hint').textContent = state.mode === MODES.CLASSIC ? 'Unaffordable upgrades are dimmed. Purchases apply immediately.' : 'Walk away from the beacon to close. Monsters do not wait.';
+  $('shop-title').textContent = state.mode === MODES.CLASSIC ? '🛠 WAVE CLEARED — UPGRADE BAY' : '⚙ ENDLESS UPGRADES';
+  $('shop-sub').textContent = state.mode === MODES.CLASSIC ? 'Safe shop: spend shared credits, then the host clicks READY for the next wave.' : 'Endless shop: buy upgrades anywhere. The fight keeps moving behind this screen.';
+  $('btn-shop-done').classList.toggle('hidden', !(state.mode === MODES.CLASSIC && state.isHost) && state.mode !== MODES.BRAWL);
+  $('btn-shop-done').textContent = state.mode === MODES.CLASSIC ? 'READY FOR NEXT WAVE →' : 'BACK TO FIGHT';
+  $('shop-hint').textContent = state.mode === MODES.CLASSIC ? 'Unaffordable upgrades are dimmed. Purchases apply immediately.' : 'Press B or BACK TO FIGHT to close. Purchases apply immediately.';
 }
-$('btn-shop-done').onclick = () => { sfx.click(); net.send({ t: 'shopDone' }); };
+$('btn-shop-done').onclick = () => {
+  sfx.click();
+  if (state.mode === MODES.BRAWL) { closeShop(); return; }
+  net.send({ t: 'shopDone' });
+};
+// Open/close the Endless upgrade overlay. Releasing pointer lock is
+// essential — while locked the mouse is captured and shop items can't be
+// clicked, which is what made the shop feel "broken".
+function openShop() {
+  if (state.mode !== MODES.BRAWL || state.screen === 'shop') return;
+  sfx.click();
+  state.shopManual = true;
+  state.shopKey = null;
+  if (document.pointerLockElement) document.exitPointerLock?.();
+  show('shop');
+  renderShopItems(net.latest());
+}
+function closeShop() {
+  if (state.mode !== MODES.BRAWL) return;
+  sfx.click();
+  state.shopManual = false;
+  show('game');
+  $('click-catch').classList.remove('hidden'); // re-prompt to re-grab controls
+}
+$('btn-upgrades').onclick = openShop;
 
 // ---------------------------------------------------------------- end
 function showEnd(snap) {
@@ -540,6 +582,14 @@ const pings = [];
 net.onPing = (msg) => { pings.push({ ...msg, t: performance.now() }); sfx.ping(); };
 window.addEventListener('keydown', (e) => {
   if (!state.playing || state.spectator) return;
+  // B toggles the Endless upgrade shop from anywhere — even while
+  // pointer-locked mid-fight (this was the missing handler; the "(B)"
+  // label promised it but nothing listened). Guarded by an E2E keypress.
+  if (e.code === 'KeyB' && state.mode === MODES.BRAWL) {
+    e.preventDefault();
+    if (state.screen === 'shop') { closeShop(); } else { openShop(); }
+    return;
+  }
   const snap = net.latest();
   const mine = snap && myMech(snap);
   if (!mine) return;
@@ -573,25 +623,24 @@ function drawPings() {
 }
 
 // ---------------------------------------------------------- settings
-const settings = { master: 0.5, music: 0.32, sfxShake: 1, quality: 'medium' };
+const settings = { master: 0.5, music: 0.32, sfx: 1, sfxShake: 1, quality: 'medium', sens: 1 };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('coo-settings') || '{}')); } catch {}
 function applySettings() {
   if (sfx.master) sfx.master.gain.value = settings.master;
   if (music.bus) music.bus.gain.value = settings.music;
   renderer.shakeMult = settings.sfxShake;
   renderer.setQuality?.(settings.quality);
+  input.sensitivity = settings.sens;
+  if (sfx.sfxGain) sfx.sfxGain.gain.value = settings.sfx;
   try { localStorage.setItem('coo-settings', JSON.stringify(settings)); } catch {}
 }
 function openSettings() {
   sfx.click();
   $('screen-settings').classList.remove('hidden');
   if (document.pointerLockElement) document.exitPointerLock?.();
-  const soloOrTraining = state.playing && (state.room?.players?.length === 1 || state.mode === MODES.TRAINING);
-  if (soloOrTraining) {
+  if (state.playing) {
     net.send({ t: MSG.PAUSE, paused: true });
-    $('settings-pause-note').textContent = 'Game paused for this solo/training session.';
-  } else if (state.playing) {
-    $('settings-pause-note').textContent = 'Multiplayer keeps running so one pilot cannot freeze everyone. Close this panel to resume controls.';
+    $('settings-pause-note').textContent = 'Game paused. Close settings to resume the room.';
   } else {
     $('settings-pause-note').textContent = '';
   }
@@ -608,6 +657,8 @@ $('set-master').oninput = (e) => { settings.master = +e.target.value; applySetti
 $('set-music').oninput = (e) => { settings.music = +e.target.value; applySettings(); };
 $('set-shake').onchange = (e) => { settings.sfxShake = +e.target.value; applySettings(); };
 $('set-quality').onchange = (e) => { settings.quality = e.target.value; applySettings(); };
+if ($('set-sens')) $('set-sens').oninput = (e) => { settings.sens = +e.target.value; applySettings(); };
+if ($('set-sfxvol')) $('set-sfxvol').oninput = (e) => { settings.sfx = +e.target.value; applySettings(); };
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Escape' && !document.pointerLockElement && state.playing) {
     if ($('screen-settings').classList.contains('hidden')) openSettings(); else closeSettings();
@@ -641,6 +692,12 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+// reflect persisted settings into the sliders
+if ($('set-master')) $('set-master').value = settings.master;
+if ($('set-music')) $('set-music').value = settings.music;
+if ($('set-sens')) $('set-sens').value = settings.sens;
+if ($('set-sfxvol')) $('set-sfxvol').value = settings.sfx;
+if ($('set-quality')) $('set-quality').value = settings.quality;
 applySettings();
 
 // A little city to look at behind the title screen
@@ -676,7 +733,7 @@ function titleCity() {
 }
 
 // Test harness handle for automated browser checks; not shown in the UI.
-window.__coo = { input, net, state, renderer };
+window.__coo = { input, net, state, renderer, openSettings, closeSettings, openShop, closeShop };
 
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function escapeHtml(s) {

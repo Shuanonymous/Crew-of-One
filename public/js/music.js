@@ -28,10 +28,35 @@ class Music {
     this.bus = ctx.createGain();
     this.bus.gain.value = 0.32;
     this.bus.connect(master);
+    // a distortion curve gives the lead a snarling guitar/synth-hybrid edge
+    const shaper = ctx.createWaveShaper();
+    const curve = new Float32Array(1024);
+    for (let i = 0; i < 1024; i++) { const x = (i / 512) - 1; curve[i] = Math.tanh(x * 4); }
+    shaper.curve = curve;
+    shaper.connect(this.bus);
+    // cinematic space: a convolver reverb fed by the sustained/melodic layers,
+    // so pads and leads bloom into a big hall instead of sitting dry and thin
+    this.reverbSend = null;
+    try {
+      const rate = ctx.sampleRate;
+      const len = Math.floor(rate * 2.8);
+      const ir = ctx.createBuffer(2, len, rate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = ir.getChannelData(ch);
+        for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2);
+      }
+      const conv = ctx.createConvolver(); conv.buffer = ir;
+      const wet = ctx.createGain(); wet.gain.value = 0.85;
+      conv.connect(wet); wet.connect(this.bus);
+      this.reverbSend = ctx.createGain(); this.reverbSend.gain.value = 0.38;
+      this.reverbSend.connect(conv);
+    } catch (e) { /* no convolver: run dry */ }
     for (const name of ['pad', 'arp', 'drums', 'bass', 'lead']) {
       const g = ctx.createGain();
       g.gain.value = 0;
-      g.connect(this.bus);
+      g.connect(name === 'lead' ? shaper : this.bus);
+      // melodic layers also feed the reverb bus for cinematic depth
+      if (this.reverbSend && (name === 'pad' || name === 'arp' || name === 'lead')) g.connect(this.reverbSend);
       this.layers[name] = g;
     }
     this.nextT = ctx.currentTime + 0.1;
@@ -99,15 +124,21 @@ class Music {
     if (s % 2 === 0) {
       this.tone('arp', SCALE[ARP[(s / 2) % 8]] * 2, t, STEP * 1.8, 'triangle', 0.16, 0.05);
     }
-    // bass: driving 8ths following the line
+    // bass: driving 8ths following the line, with a clean sine sub octave
+    // underneath for cinematic low-end weight
     if (s % 2 === 0) {
       this.tone('bass', SCALE[BASS_LINE[half]] * 0.5, t, STEP * 1.6, 'square', 0.22, 0.02);
+      this.tone('bass', SCALE[BASS_LINE[half]] * 0.25, t, STEP * 1.6, 'sine', 0.20, 0.02);
     }
     // drums
     if (bar16 % 4 === 0) this.kick(t);
     if (bar16 === 4 || bar16 === 12) this.snare(t);
     if (s % 2 === 1) this.hat(t, 0.5);
     if (this.state === 'boss' && s % 2 === 0) this.hat(t, 0.3); // double-time
+    // boss: a rolling war-tom fill leading into the downbeat — epic dread
+    if (this.state === 'boss' && (bar16 === 13 || bar16 === 14 || bar16 === 15)) {
+      this.tom(t, 78 + (bar16 - 13) * 16);
+    }
     // lead: sparse dramatic phrase every 4 bars in boss
     if (this.state === 'boss' && s % 4 === 0 && Math.floor(s / 64) % 2 === 1) {
       const n = SCALE[LEAD[(s / 4) % 8] % 7] * 2;
@@ -139,6 +170,17 @@ class Music {
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
     o.connect(g); g.connect(this.layers.drums);
     o.start(t); o.stop(t + 0.25);
+  }
+
+  tom(t, freq) {
+    const o = this.ctx.createOscillator();
+    o.frequency.setValueAtTime(freq, t);
+    o.frequency.exponentialRampToValueAtTime(freq * 0.5, t + 0.3);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.55, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.34);
+    o.connect(g); g.connect(this.layers.drums);
+    o.start(t); o.stop(t + 0.38);
   }
 
   snare(t) {

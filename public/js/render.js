@@ -15,7 +15,7 @@ const V3 = THREE.Vector3;
 // The run is a journey: sunset -> dusk -> neon night -> dawn, per wave.
 const PALETTES = [
   { name: 'nightrain', sky: ['#0a0d1c', '#141833', '#252048', '#3a2a5e'], fog: '#1d1b33',
-    hemi: ['#7d8fc9', '#1d1a33'], sun: '#8fa3d9', sunI: 1.1, sunPos: [-60, 50, -40], amb: 0.85, sunDisc: '#dfe6ff' },
+    hemi: ['#9fb0e0', '#26223f'], sun: '#bcd0ff', sunI: 2.0, sunPos: [-60, 60, -35], amb: 1.35, sunDisc: '#dfe6ff' },
   { name: 'sunset', sky: ['#5d7ec9', '#9b8fd4', '#f2a08a', '#f9c46b'], fog: '#e89a80',
     hemi: ['#ffe8c9', '#6b5d8f'], sun: '#ffc27d', sunI: 2.2, sunPos: [80, 38, 30], amb: 1.0, sunDisc: '#ffd9a0' },
   { name: 'dusk', sky: ['#2c2a5e', '#5d4a8f', '#b0628f', '#e8896b'], fog: '#8f5a7a',
@@ -32,6 +32,9 @@ export class Renderer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.scene = new THREE.Scene();
     this.skyCanvas = document.createElement('canvas');
@@ -58,9 +61,14 @@ export class Renderer {
     this.sun.shadow.camera.far = 400;
     this.scene.add(this.sun);
     // cool rim light from behind so the mech pops off the sky
-    this.rim = new THREE.DirectionalLight('#8aa5ff', 0.7);
+    this.rim = new THREE.DirectionalLight('#8aa5ff', 1.25);
     this.rim.position.set(-50, 35, -60);
     this.scene.add(this.rim);
+    // warm fill from the opposite side — cinematic two-tone key/rim so the
+    // hull never flattens into a silhouette (cool moon vs warm sodium glow)
+    this.fill = new THREE.DirectionalLight('#ffb87a', 0.55);
+    this.fill.position.set(55, 26, 45);
+    this.scene.add(this.fill);
 
     // giant low sun/moon disc (blooms nicely)
     this.sunDisc = new THREE.Mesh(
@@ -152,9 +160,22 @@ export class Renderer {
     this.applyPalette(this.palA, this.palA, 1);
 
     // bloom pipeline: only genuinely bright things glow
+    // procedural environment map so PBR metal reflects the night sky/city glow
+    try {
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      const envScene = new THREE.Scene();
+      envScene.background = new THREE.Color('#141833');
+      const glow = new THREE.Mesh(new THREE.SphereGeometry(50, 8, 8),
+        new THREE.MeshBasicMaterial({ color: '#3a4a7a', side: THREE.BackSide }));
+      envScene.add(glow);
+      const neon = new THREE.PointLight('#4dfff0', 40, 200); neon.position.set(20, 10, 20); envScene.add(neon);
+      const neon2 = new THREE.PointLight('#ff5da2', 40, 200); neon2.position.set(-25, 8, -15); envScene.add(neon2);
+      this.scene.environment = pmrem.fromScene(envScene).texture;
+    } catch (e) { /* PMREM unsupported: metal falls back to lit-only */ }
+
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.55, 0.5, 0.82);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.9, 0.6, 0.6);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
 
@@ -291,6 +312,30 @@ export class Renderer {
     this.effects.push({ m, t: 0, dur, maxR, kind: 'ring' });
   }
 
+  // drifting smoke puff (rocket trails, explosions)
+  smoke(pos) {
+    const m = new THREE.Mesh(
+      new THREE.SphereGeometry(0.7 + Math.random() * 0.5, 6, 5),
+      new THREE.MeshBasicMaterial({ color: '#6b6b78', transparent: true, opacity: 0.5 })
+    );
+    m.position.set(pos[0] + (Math.random() - 0.5), pos[1], pos[2] + (Math.random() - 0.5));
+    this.scene.add(m);
+    this.effects.push({ m, t: 0, dur: 1.1, kind: 'smoke', rise: 3 + Math.random() * 2 });
+    const smokes = this.effects.filter((e) => e.kind === 'smoke');
+    if (smokes.length > 60) { smokes[0].t = smokes[0].dur; }
+  }
+
+  // bright muzzle flash at a world point (gunfire / rocket launch)
+  muzzle(pos, color = '#fff2c0', size = 2.4) {
+    const m = new THREE.Mesh(
+      new THREE.SphereGeometry(size, 8, 6),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 })
+    );
+    m.position.set(pos[0], pos[1], pos[2]);
+    this.scene.add(m);
+    this.effects.push({ m, t: 0, dur: 0.12, kind: 'muzzle' });
+  }
+
   scorch(pos, r = 3.2) {
     const m = new THREE.Mesh(
       new THREE.CircleGeometry(r, 20),
@@ -315,6 +360,13 @@ export class Renderer {
         e.m.material.opacity = 0.95 * (1 - k);
       } else if (e.kind === 'scorch') {
         e.m.material.opacity = 0.75 * (1 - Math.max(0, k - 0.7) / 0.3);
+      } else if (e.kind === 'smoke') {
+        e.m.position.y += e.rise * dt;
+        e.m.scale.setScalar(1 + k * 1.8);
+        e.m.material.opacity = 0.5 * (1 - k);
+      } else if (e.kind === 'muzzle') {
+        e.m.scale.setScalar(1 + k * 1.5);
+        e.m.material.opacity = 0.95 * (1 - k);
       }
       if (e.t >= e.dur) this.scene.remove(e.m);
     }
@@ -380,9 +432,11 @@ export class Renderer {
 
     for (const d of world.city) {
       if (d.kind === 'ground') {
+        // rain-slicked asphalt: dark, semi-metallic, low roughness so it
+        // mirrors the neon sky/city through the env map (cinematic wet look)
         const mesh = new THREE.Mesh(
           new THREE.BoxGeometry(...d.size),
-          new THREE.MeshLambertMaterial({ color: d.color })
+          new THREE.MeshStandardMaterial({ color: '#0e1220', metalness: 0.85, roughness: 0.28, envMapIntensity: 1.2 })
         );
         mesh.position.set(...d.p);
         mesh.receiveShadow = true;
@@ -439,9 +493,14 @@ export class Renderer {
       g.add(mesh);
     }
 
+    // ---- war damage: a kaiju has been through here. Broken rooflines,
+    // rubble mounds, exposed rebar, scattered debris. All merged into a
+    // few meshes so the destruction costs almost nothing to draw. ----
+    this.buildDamage(g, world);
+
     // endless-run interactables
     this.beaconViews = [];
-    for (const b of world.beacons || []) {
+    for (const b of []) { // beacons removed — endless buys anywhere
       const grp = new THREE.Group();
       const pylon = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.4, 9, 8),
         new THREE.MeshLambertMaterial({ color: '#2a3145' }));
@@ -554,6 +613,85 @@ export class Renderer {
     }
   }
 
+  // Battle-damage the district: broken tops, rubble, rebar, debris fields.
+  // Deterministic per building position so every client sees the same ruin.
+  buildDamage(g, world) {
+    const concrete = [];   // grey chunks (rubble, broken slabs)
+    const rebarGeos = [];  // thin rusty bars poking out of the wreckage
+    const emberChunks = []; // still-glowing hot debris
+    const pushBox = (arr, w, h, dd, x, y, z, rx = 0, ry = 0, rz = 0) => {
+      const b = new THREE.BoxGeometry(w, h, dd);
+      if (rx || ry || rz) { b.rotateX(rx); b.rotateY(ry); b.rotateZ(rz); }
+      b.translate(x, y, z);
+      arr.push(b);
+    };
+    const buildings = (world.city || []).filter((d) => d.kind === 'building');
+    for (const d of buildings) {
+      const h = hashStr('dmg' + d.p[0] + '_' + d.p[2]);
+      const rng = mulberry32(h);
+      const [w, bh, dp] = d.size;
+      const topY = d.p[1] + bh / 2;
+      // ~55% of buildings are visibly wrecked
+      if (h % 100 < 55) {
+        // broken, jagged roofline: uneven concrete teeth around the top edge
+        const teeth = 3 + (h % 4);
+        for (let i = 0; i < teeth; i++) {
+          const tw = w * (0.18 + rng() * 0.22);
+          const th = 1.5 + rng() * (bh * 0.14);
+          const ex = (rng() - 0.5) * (w - tw);
+          const ez = (rng() - 0.5) * (dp - tw);
+          pushBox(concrete, tw, th, tw, d.p[0] + ex, topY + th / 2 - 0.4, d.p[2] + ez, 0, rng() * 0.6, (rng() - 0.5) * 0.25);
+          if (rng() < 0.5) pushBox(rebarGeos, 0.08, th * 1.5, 0.08, d.p[0] + ex, topY + th * 0.9, d.p[2] + ez, (rng() - 0.5) * 0.4, 0, (rng() - 0.5) * 0.4);
+        }
+        // gouged blast scar partway up the facade (a dark recessed chunk)
+        if (h % 3 === 0 && bh > 16) {
+          const sy = d.p[1] + (rng() - 0.3) * bh * 0.4;
+          pushBox(concrete, w * 0.3, bh * 0.16, 1.2, d.p[0] + (rng() - 0.5) * w * 0.4, sy, d.p[2] + dp / 2, 0, 0, (rng() - 0.5) * 0.3);
+        }
+      }
+      // rubble mound at the base for most buildings
+      if (h % 100 < 62) {
+        const chunks = 3 + (h % 5);
+        for (let i = 0; i < chunks; i++) {
+          const cw = 1.2 + rng() * 2.6;
+          const ch = 0.8 + rng() * 1.8;
+          const a = rng() * Math.PI * 2;
+          const rad = (Math.max(w, dp) / 2) + 0.5 + rng() * 3;
+          const rx = d.p[0] + Math.cos(a) * rad;
+          const rz = d.p[2] + Math.sin(a) * rad;
+          pushBox(concrete, cw, ch, cw * (0.7 + rng() * 0.6), rx, ch / 2, rz, (rng() - 0.5) * 0.5, rng() * Math.PI, (rng() - 0.5) * 0.5);
+          if (rng() < 0.25) pushBox(emberChunks, 0.5, 0.5, 0.5, rx, 0.3, rz);
+        }
+      }
+    }
+    // scattered debris field across open ground (deterministic global seed)
+    const grng = mulberry32(90210);
+    for (let i = 0; i < 60; i++) {
+      const x = (grng() - 0.5) * 300;
+      const z = (grng() - 0.5) * 300;
+      if (Math.hypot(x, z) < 22) continue; // keep spawn plaza clearer
+      const cw = 0.8 + grng() * 2.2;
+      const ch = 0.5 + grng() * 1.2;
+      pushBox(concrete, cw, ch, cw, x, ch / 2, z, (grng() - 0.5) * 0.4, grng() * Math.PI, (grng() - 0.5) * 0.4);
+    }
+    const cMat = new THREE.MeshStandardMaterial({ color: '#4a4854', metalness: 0.1, roughness: 0.95, flatShading: true });
+    if (concrete.length) {
+      const m = new THREE.Mesh(mergeGeometries(concrete), cMat);
+      m.castShadow = m.receiveShadow = true; g.add(m);
+    }
+    if (rebarGeos.length) {
+      const m = new THREE.Mesh(mergeGeometries(rebarGeos),
+        new THREE.MeshStandardMaterial({ color: '#6e4a34', metalness: 0.8, roughness: 0.6 }));
+      g.add(m);
+    }
+    if (emberChunks.length) {
+      const m = new THREE.Mesh(mergeGeometries(emberChunks),
+        new THREE.MeshStandardMaterial({ color: '#2a0f04', emissive: new THREE.Color('#ff5a1e'), emissiveIntensity: 1.4, roughness: 0.9 }));
+      g.add(m);
+      this.emberDebris = m;
+    }
+  }
+
   // client-side rooftop garnish: water towers, AC units, antennas, neon
   decorateBuilding(g, d) {
     const h = hashStr(d.p[0] + ',' + d.p[2]);
@@ -642,6 +780,43 @@ export class Renderer {
       const qa = new THREE.Quaternion(...pa.q), qb = new THREE.Quaternion(...pb.q);
       mesh.quaternion.copy(qa.slerp(qb, alpha));
     }
+
+    // mech tracers + missiles (ranged weapons) — pooled scene meshes
+    this._weaponPool = this._weaponPool || { tracers: [], missiles: [] };
+    this._trPrev = this._trPrev || new Map(); // last position per tracer, for streak orientation
+    let ti = 0, mi = 0;
+    for (const mb of b.mechs) {
+      for (const tr of mb.tracers || []) {
+        let mesh = this._weaponPool.tracers[ti];
+        if (!mesh) {
+          // elongated glowing round — reads as a tracer streak, not a ball
+          mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.4, 6),
+            new THREE.MeshBasicMaterial({ color: '#fff2c0' }));
+          this.scene.add(mesh); this._weaponPool.tracers[ti] = mesh;
+        }
+        mesh.visible = true;
+        const cur = new V3(tr.p[0], tr.p[1], tr.p[2]);
+        const prev = this._trPrev.get(ti);
+        if (prev) mesh.quaternion.setFromUnitVectors(new V3(0, 1, 0), cur.clone().sub(prev).normalize());
+        this._trPrev.set(ti, cur.clone());
+        mesh.position.copy(cur);
+        ti++;
+      }
+      for (const ms of mb.missiles || []) {
+        let mesh = this._weaponPool.missiles[mi];
+        if (!mesh) {
+          mesh = new THREE.Mesh(new THREE.ConeGeometry(0.5, 2.2, 8),
+            new THREE.MeshStandardMaterial({ color: '#e8503a', emissive: new THREE.Color('#ff6a3a'), emissiveIntensity: 2, metalness: 0.4, roughness: 0.5 }));
+          this.scene.add(mesh); this._weaponPool.missiles[mi] = mesh;
+        }
+        mesh.visible = true; mesh.position.set(ms.p[0], ms.p[1], ms.p[2]); mesh.rotation.x += dt * 8;
+        // smoke trail: drop a fading puff behind the rocket
+        if (Math.random() < 0.7) this.smoke(ms.p);
+        mi++;
+      }
+    }
+    for (let i = ti; i < this._weaponPool.tracers.length; i++) this._weaponPool.tracers[i].visible = false;
+    for (let i = mi; i < this._weaponPool.missiles.length; i++) this._weaponPool.missiles[i].visible = false;
 
     // spitter globs
     const seenPj = new Set();
@@ -803,90 +978,131 @@ class MechView {
     this.root = new THREE.Group();
     scene.add(this.root);
 
-    const main = new THREE.MeshLambertMaterial({ color });
-    const dark = new THREE.MeshLambertMaterial({ color: '#2b2d42' });
-    const trim = new THREE.MeshLambertMaterial({ color: '#fdf6ec' });
+    // ---- authored PBR materials: painted gunmetal hull, dark joints,
+    // chromed pistons, glowing reactor accents ----
+    const hull = new THREE.Color(color).multiplyScalar(0.92); // painted gunmetal
+    const main = new THREE.MeshStandardMaterial({ color: hull, metalness: 0.75, roughness: 0.42, envMapIntensity: 1.1 });
+    const plate = new THREE.MeshStandardMaterial({ color: new THREE.Color(color).multiplyScalar(0.7), metalness: 0.85, roughness: 0.34, envMapIntensity: 1.2 });
+    const dark = new THREE.MeshStandardMaterial({ color: '#2b2f3d', metalness: 0.9, roughness: 0.3, envMapIntensity: 1.1 });
+    const piston = new THREE.MeshStandardMaterial({ color: '#d6dae4', metalness: 1.0, roughness: 0.14, envMapIntensity: 1.4 });
+    const trim = new THREE.MeshStandardMaterial({ color: '#0a0d18', metalness: 0.5, roughness: 0.3, emissive: new THREE.Color('#3fe6ff'), emissiveIntensity: 3.2 });
+    const hazard = new THREE.MeshStandardMaterial({ color: '#1a1206', metalness: 0.6, roughness: 0.5, emissive: new THREE.Color('#ff8a1e'), emissiveIntensity: 1.8 });
     this.mats = { main, dark, trim };
 
-    // torso
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(4.2, 5.6, 2.8), main);
-    torso.castShadow = true;
-    this.root.add(torso);
-    const chest = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.2, 0.4), trim);
-    chest.position.set(0, 0.9, -1.5);
-    this.root.add(chest);
-    const vents = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.9, 0.3), dark);
-    vents.position.set(0, -1.6, -1.45);
-    this.root.add(vents);
+    // helper: add a mesh at (x,y,z) with optional rotation + shadow
+    const P = (parent, geo, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z); m.rotation.set(rx, ry, rz);
+      m.castShadow = true; m.receiveShadow = true;
+      parent.add(m); return m;
+    };
+    const bevel = (w, h, d) => new THREE.BoxGeometry(w, h, d); // (kept simple for perf)
 
-    // shoulder pads
-    for (const side of [-1, 1]) {
-      const pad = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.6, 2.4), dark);
-      pad.position.set(side * 2.9, 2.4, 0);
-      pad.castShadow = true;
-      this.root.add(pad);
+    // ================= TORSO =================
+    // tapered core (wider shoulders, narrow waist) built from stacked plates
+    P(this.root, new THREE.CylinderGeometry(2.5, 1.9, 3.4, 8), main, 0, 0.9, 0);   // upper chest drum
+    P(this.root, bevel(3.0, 1.6, 2.2), plate, 0, 1.6, -0.2);                        // chest plate
+    P(this.root, bevel(1.8, 1.9, 1.8), dark, 0, -1.8, 0);                           // waist block
+    P(this.root, bevel(2.6, 0.5, 2.2), plate, 0, -0.9, 0);                          // belt
+    // angled pectoral plates
+    for (const s of [-1, 1]) P(this.root, bevel(1.3, 1.5, 0.5), plate, s * 0.85, 1.5, -1.15, 0.2, 0, -s * 0.25);
+    // glowing reactor core in the chest
+    P(this.root, new THREE.CylinderGeometry(0.55, 0.55, 0.4, 12), trim, 0, 0.9, -1.35, Math.PI / 2, 0, 0);
+    // back thruster pods
+    for (const s of [-1, 1]) {
+      P(this.root, new THREE.CylinderGeometry(0.5, 0.62, 2.2, 8), dark, s * 1.1, 1.2, 1.4);
+      P(this.root, new THREE.CylinderGeometry(0.45, 0.45, 0.3, 8), hazard, s * 1.1, 0.1, 1.5);
+    }
+    // side exhaust vents
+    for (const s of [-1, 1]) for (let i = 0; i < 3; i++)
+      P(this.root, bevel(0.3, 0.16, 1.4), hazard, s * 1.65, 0.5 - i * 0.45, -0.3);
+
+    // ================= SHOULDERS (layered pauldrons) =================
+    for (const s of [-1, 1]) {
+      const sh = new THREE.Group();
+      sh.position.set(s * 2.75, 2.15, 0);
+      this.root.add(sh);
+      P(sh, bevel(2.1, 1.7, 2.6), plate, 0, 0, 0);                 // main pauldron
+      P(sh, bevel(2.3, 0.6, 2.8), dark, 0, 0.85, 0);               // top ridge
+      P(sh, bevel(0.5, 1.3, 2.2), main, s * 1.0, -0.1, 0, 0, 0, -s * 0.3); // outer flare
+      P(sh, new THREE.CylinderGeometry(0.18, 0.18, 2.4, 6), piston, 0, -0.2, 0, Math.PI / 2, 0, 0); // rivet bar
+      P(sh, bevel(0.4, 0.4, 0.4), trim, 0, 0.4, -1.4);             // marker light
     }
 
-    // head: visor + one BIG eye that charges up
+    // ================= HEAD (angular, T-visor) =================
     this.head = new THREE.Group();
-    this.head.position.set(0, 3.9, 0);
+    this.head.position.set(0, 3.35, -0.1);
     this.root.add(this.head);
-    const skull = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.7, 1.9), main);
-    skull.castShadow = true;
-    this.head.add(skull);
-    const visor = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.75, 0.3), dark);
-    visor.position.set(0, 0.12, -0.95);
-    this.head.add(visor);
-    this.eye = new THREE.Mesh(
-      new THREE.SphereGeometry(0.34, 12, 10),
-      new THREE.MeshBasicMaterial({ color: '#c78bd6' })
-    );
-    this.eye.position.set(0, 0.12, -1.05);
+    P(this.head, new THREE.CylinderGeometry(0.95, 1.15, 1.5, 6), main, 0, 0, 0);   // faceted skull
+    P(this.head, bevel(1.9, 0.7, 0.4), dark, 0, 0.1, -0.85);                        // brow
+    P(this.head, bevel(0.9, 0.55, 0.4), plate, 0, -0.55, -0.7);                     // chin guard
+    // side "ear" comms blocks
+    for (const s of [-1, 1]) P(this.head, bevel(0.35, 0.7, 0.7), dark, s * 1.0, 0, 0.1);
+    // the eye: a horizontal T-visor slit (emissive; charges up)
+    this.eye = new THREE.Mesh(bevel(1.35, 0.32, 0.18), new THREE.MeshBasicMaterial({ color: '#7fe9ff' }));
+    this.eye.position.set(0, -0.05, -0.92);
     this.head.add(this.eye);
-    // rigid blade antenna with a slow-blinking warning light (not a bobble —
-    // this thing is a weapons platform, not a toy)
-    const antenna = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.4, 0.28), dark);
-    antenna.position.set(0.7, 1.4, 0);
-    this.head.add(antenna);
-    this.blinker = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8),
+    // swept crest fin
+    P(this.head, bevel(0.16, 0.9, 1.1), plate, 0, 0.7, 0.2, -0.5, 0, 0);
+    // blinking sensor light (kept as the ragdoll/charge indicator)
+    this.blinker = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8),
       new THREE.MeshBasicMaterial({ color: '#ff4d5e' }));
-    this.blinker.position.set(0.7, 2.15, 0);
+    this.blinker.position.set(0.62, 0.55, 0.2);
     this.head.add(this.blinker);
 
-    // legs
+    // ================= LEGS (digitigrade, actuated) =================
     this.legs = [];
     for (const side of [-1, 1]) {
       const hip = new THREE.Group();
-      hip.position.set(side * 1.25, -2.8, 0);
+      hip.position.set(side * 1.2, -2.6, 0);
       this.root.add(hip);
-      const thigh = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2.6, 1.7), dark);
-      thigh.position.y = -1.3;
-      thigh.castShadow = true;
-      hip.add(thigh);
+      P(hip, new THREE.SphereGeometry(0.7, 10, 8), dark, 0, 0, 0);                 // hip ball
+      P(hip, new THREE.CylinderGeometry(0.9, 0.75, 2.4, 6), main, 0, -1.3, 0);     // thigh armor
+      P(hip, bevel(0.5, 1.8, 0.5), plate, side * 0.7, -1.3, 0.1);                  // thigh side plate
+      P(hip, new THREE.CylinderGeometry(0.12, 0.12, 2.0, 6), piston, side * 0.35, -1.3, 0.55); // hydraulic rod
+
       const shinG = new THREE.Group();
       shinG.position.y = -2.6;
       hip.add(shinG);
-      const shin = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.2, 1.4), main);
-      shin.position.y = -1.1;
-      shin.castShadow = true;
-      shinG.add(shin);
-      const foot = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.8, 2.6), dark);
-      foot.position.set(0, -2.4, -0.35);
-      foot.castShadow = true;
-      shinG.add(foot);
+      P(shinG, new THREE.SphereGeometry(0.5, 8, 8), piston, 0, 0.1, 0);            // knee actuator
+      P(shinG, bevel(0.3, 0.9, 0.3), piston, 0, 0.55, 0.4);                        // knee piston
+      P(shinG, new THREE.CylinderGeometry(0.7, 0.55, 2.2, 6), main, 0, -1.1, 0);   // shin
+      P(shinG, bevel(1.0, 1.4, 0.4), plate, 0, -1.0, -0.55);                       // shin guard
+      // splayed foot with toe plates + heel
+      P(shinG, bevel(1.5, 0.5, 2.4), dark, 0, -2.3, -0.2);                         // foot base
+      P(shinG, bevel(1.5, 0.35, 0.7), plate, 0, -2.15, -1.5);                      // toe
+      P(shinG, bevel(1.0, 0.5, 0.6), dark, 0, -2.3, 1.0);                          // heel spur
       this.legs.push({ hip, shinG, side });
     }
     this.walkPhase = 0;
 
-    // arms: world-space segments (shoulder -> elbow -> fist)
+    // ================= ARMS =================
+    // Segments stretch dramatically as the fist rockets out on a punch
+    // (up to ~8u reach), so they are single tubular meshes that scale
+    // cleanly along Y. The chrome forearm reads as an extending hydraulic
+    // ram; nested concentric sleeves add read-through detail without
+    // distorting under stretch. All the sculpted detail lives in the
+    // fist (positioned + uniformly scaled) and the elbow actuator.
     this.arms = {};
     for (const side of ['L', 'R']) {
       const s = side === 'L' ? -1 : 1;
-      const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.55, 1), dark);
-      const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.5, 1), main);
-      const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.66, 10, 8), dark);
-      const fist = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.7, 1.7), trim);
-      upper.castShadow = fore.castShadow = fist.castShadow = true;
+      // upper arm: armored cylinder with a concentric cable sleeve
+      const upper = new THREE.Group();
+      P(upper, new THREE.CylinderGeometry(0.5, 0.44, 1, 10), main, 0, 0, 0);
+      P(upper, new THREE.CylinderGeometry(0.6, 0.58, 0.28, 10), plate, 0, 0.34, 0); // shoulder cuff (stays tubular)
+      // forearm: chromed piston ram + a darker outer housing at the elbow end
+      const fore = new THREE.Group();
+      P(fore, new THREE.CylinderGeometry(0.36, 0.34, 1, 10), piston, 0, 0, 0);      // bright ram core
+      P(fore, new THREE.CylinderGeometry(0.52, 0.4, 0.5, 10), main, 0, 0.28, 0);    // forearm housing (elbow side)
+      P(fore, new THREE.CylinderGeometry(0.4, 0.46, 0.22, 10), dark, 0, -0.42, 0);  // wrist collar (fist side)
+      const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.6, 12, 10), piston);
+      // fist: knuckle block + finger plates + emissive energy core
+      const fist = new THREE.Group();
+      P(fist, bevel(1.5, 1.3, 1.5), plate, 0, 0, 0);
+      P(fist, bevel(1.62, 0.5, 1.62), dark, 0, 0.45, 0);       // knuckle ridge
+      for (let k = -1; k <= 1; k++) P(fist, bevel(0.4, 0.55, 0.95), main, k * 0.45, 0.55, -0.35); // fingers
+      P(fist, bevel(0.55, 0.9, 0.55), dark, 0, -0.2, 0.7);     // thumb
+      P(fist, bevel(0.85, 0.32, 0.32), trim, 0, 0, -0.78);     // energy knuckleduster
       scene.add(upper, fore, elbow, fist);
       this.arms[side] = { s, upper, fore, elbow, fist, pos: new V3() };
     }
@@ -1139,52 +1355,97 @@ class CrabView {
     const dark = new THREE.MeshLambertMaterial({ color: style.dark });
     this.flashMats = [shell, belly, dark];
 
-    const body = new THREE.Mesh(new THREE.BoxGeometry(5.6, 2.6, 4.2), shell);
-    body.castShadow = true;
-    this.root.add(body);
-    const under = new THREE.Mesh(new THREE.BoxGeometry(4.6, 1.2, 3.4), belly);
-    under.position.y = -1.1;
+    // domed rocky carapace (flat-shaded low-poly = chitinous, not a box)
+    const carapace = new THREE.Mesh(new THREE.IcosahedronGeometry(3.3, 1),
+      new THREE.MeshLambertMaterial({ color: style.shell, flatShading: true }));
+    carapace.scale.set(1.05, 0.62, 0.92);
+    carapace.position.y = 0.5;
+    carapace.castShadow = true;
+    this.root.add(carapace);
+    this.flashMats.push(carapace.material);
+    // segmented lower body / mouth mass
+    const under = new THREE.Mesh(new THREE.BoxGeometry(4.6, 1.4, 3.4), belly);
+    under.position.y = -0.9;
     this.root.add(under);
-
-    // predator eye slits — dangerous, not adorable
-    this.eyes = [];
+    // serrated mandible plates at the front
     for (const s of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.22, 0.3),
+      const mand = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.6, 5), dark);
+      mand.rotation.x = -Math.PI / 2.1; mand.rotation.z = s * 0.3;
+      mand.position.set(s * 0.7, -0.4, -2.5);
+      this.root.add(mand);
+    }
+    // ridge of back spikes down the carapace — kaiju menace
+    for (let i = 0; i < 5; i++) {
+      const t = (i - 2) / 2;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.5 - Math.abs(t) * 0.15, 1.6 + (1 - Math.abs(t)) * 1.1, 5), dark);
+      spike.position.set(0, 1.7 - Math.abs(t) * 0.4, -0.2 + t * 1.6);
+      spike.rotation.x = -0.2 + t * 0.25;
+      this.root.add(spike);
+      // flanking smaller spikes
+      for (const s of [-1, 1]) {
+        const sp = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.9, 4), shell);
+        sp.position.set(s * (1.3 + Math.abs(t) * 0.3), 1.1 - Math.abs(t) * 0.3, -0.2 + t * 1.5);
+        sp.rotation.x = -0.2; sp.rotation.z = s * 0.5;
+        this.root.add(sp);
+      }
+    }
+
+    // deep-set predator eyes under a heavy brow
+    this.eyes = [];
+    const brow = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.5, 0.8), dark);
+    brow.position.set(0, 1.75, -2.0); brow.rotation.x = 0.25;
+    this.root.add(brow);
+    for (const s of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.26, 0.34),
         new THREE.MeshBasicMaterial({ color: '#ff2e3f' }));
-      eye.position.set(s * 1.1, 1.6, -2.1);
-      eye.rotation.z = -s * 0.28;
+      eye.position.set(s * 1.15, 1.45, -2.25);
+      eye.rotation.z = -s * 0.32;
       this.root.add(eye);
       this.eyes.push({ eye });
     }
 
-    // claws
+    // claws: heavy tapered arm + an open two-prong pincer
     this.claws = [];
     for (const s of [-1, 1]) {
       const armG = new THREE.Group();
-      armG.position.set(s * 2.9, 0.4, -1.4);
+      armG.position.set(s * 3.0, 0.3, -1.4);
       this.root.add(armG);
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 2.2), dark);
-      arm.position.z = -1.0;
+      const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.85, 8, 6), dark);
+      armG.add(shoulder);
+      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.85, 2.6, 7), dark);
+      arm.rotation.x = Math.PI / 2; arm.position.z = -1.2;
       armG.add(arm);
-      const claw = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.5, 2.3), shell);
-      claw.position.z = -2.6;
-      claw.castShadow = true;
-      armG.add(claw);
-      const pincer = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 1.6), dark);
-      pincer.position.set(0, 0.85, -2.9);
-      armG.add(pincer);
+      // knuckle
+      const knuckle = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.7, 1.9), shell);
+      knuckle.position.z = -2.7; knuckle.castShadow = true;
+      armG.add(knuckle);
+      // upper + lower pincer prongs (tapered, with a gap = looks like it can grab)
+      const upper = new THREE.Mesh(new THREE.ConeGeometry(0.55, 2.6, 5), shell);
+      upper.rotation.x = -Math.PI / 2; upper.position.set(0, 0.55, -4.0);
+      armG.add(upper);
+      const lower = new THREE.Mesh(new THREE.ConeGeometry(0.5, 2.3, 5), dark);
+      lower.rotation.x = -Math.PI / 2; lower.position.set(0, -0.5, -3.9);
+      armG.add(lower);
       this.claws.push(armG);
     }
 
-    // legs: 3 stubs per side
+    // legs: 3 jointed limbs per side (upper thigh angled out, lower angled down)
     this.legMeshes = [];
     for (const s of [-1, 1]) {
       for (let i = 0; i < 3; i++) {
-        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.55, 1.9, 0.55), dark);
-        leg.position.set(s * 3.0, -1.5, -1.2 + i * 1.3);
-        leg.rotation.z = s * 0.5;
-        this.root.add(leg);
-        this.legMeshes.push(leg);
+        const legG = new THREE.Group();
+        legG.position.set(s * 2.6, -0.4, -1.4 + i * 1.4);
+        const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.3, 2.0, 6), dark);
+        thigh.rotation.z = s * 1.0; thigh.position.set(s * 0.8, -0.3, 0);
+        legG.add(thigh);
+        const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.12, 2.4, 6), dark);
+        shin.position.set(s * 1.7, -1.4, 0); shin.rotation.z = s * 0.25;
+        legG.add(shin);
+        const foot = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.7, 5), shell);
+        foot.position.set(s * 1.95, -2.5, 0);
+        legG.add(foot);
+        this.root.add(legG);
+        this.legMeshes.push(legG);
       }
     }
 
@@ -1279,34 +1540,49 @@ class SpitterView {
     this.scene = scene;
     this.root = new THREE.Group();
     scene.add(this.root);
-    const skin = new THREE.MeshLambertMaterial({ color: '#7aa843' });
-    const belly = new THREE.MeshLambertMaterial({ color: '#c9e07a' });
-    const dark = new THREE.MeshLambertMaterial({ color: '#4a6b28' });
+    const skin = new THREE.MeshLambertMaterial({ color: '#5f7a2e', flatShading: true });
+    const belly = new THREE.MeshLambertMaterial({ color: '#b6c96a', flatShading: true });
+    const dark = new THREE.MeshLambertMaterial({ color: '#38501c' });
     this.flashMats = [skin, belly, dark];
 
-    const body = new THREE.Mesh(new THREE.SphereGeometry(2.6, 10, 8), skin);
-    body.scale.set(1.15, 0.8, 1.1);
+    // warty low-poly bulk
+    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(2.5, 1), skin);
+    body.scale.set(1.2, 0.82, 1.05);
     body.castShadow = true;
     this.root.add(body);
-    this.throat = new THREE.Mesh(new THREE.SphereGeometry(1.5, 10, 8), belly);
-    this.throat.position.set(0, -0.6, -1.6);
+    // a distended acid-sac throat that inflates before it spits
+    this.throat = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 1), belly);
+    this.throat.position.set(0, -0.5, -1.7);
     this.root.add(this.throat);
-    this.snout = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 1.0, 2.2, 8), dark);
+    // gaping maw (wide cone) it fires through
+    this.snout = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 1.25, 2.0, 7), dark);
     this.snout.rotation.x = Math.PI / 2.4;
-    this.snout.position.set(0, 0.9, -2.2);
+    this.snout.position.set(0, 0.85, -2.2);
     this.root.add(this.snout);
+    // knobbly warts scattered across the back
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2;
+      const wart = new THREE.Mesh(new THREE.IcosahedronGeometry(0.3 + (i % 3) * 0.12, 0), dark);
+      wart.position.set(Math.cos(a) * 1.7, 1.2 + Math.sin(i) * 0.5, Math.sin(a) * 1.3 + 0.2);
+      this.root.add(wart);
+    }
     for (const s of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 8),
-        new THREE.MeshBasicMaterial({ color: '#ff2e3f' }));
-      eye.position.set(s * 1.2, 1.6, -1.2);
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6),
+      // bulging asymmetric eyes on stalks
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 8),
+        new THREE.MeshBasicMaterial({ color: '#d3ff4d' }));
+      eye.position.set(s * 1.15, 1.7, -1.1);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.26, 8, 6),
         new THREE.MeshLambertMaterial({ color: '#1d2033' }));
-      pupil.position.z = -0.34;
+      pupil.position.z = -0.4;
       eye.add(pupil);
       this.root.add(eye);
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.4, 0.8), dark);
-      leg.position.set(s * 2.2, -1.8, 0.5);
-      this.root.add(leg);
+      // splayed webbed legs (thigh + foot)
+      const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 1.5, 6), dark);
+      thigh.position.set(s * 2.1, -1.3, 0.4); thigh.rotation.z = s * 0.6;
+      this.root.add(thigh);
+      const foot = new THREE.Mesh(new THREE.ConeGeometry(0.7, 0.5, 4), skin);
+      foot.rotation.x = -Math.PI / 2; foot.position.set(s * 2.7, -1.9, -0.1);
+      this.root.add(foot);
     }
     this.bar = makeHpBar(scene);
     this.flashT = 0;
@@ -1348,42 +1624,64 @@ class FlyerView {
     this.scene = scene;
     this.root = new THREE.Group();
     scene.add(this.root);
-    const grey = new THREE.MeshLambertMaterial({ color: '#d8d3c8' });
-    const dark = new THREE.MeshLambertMaterial({ color: '#8f8878' });
-    this.flashMats = [grey, dark];
+    // a leathery wyvern, not a gull: sinewy body, membrane wings, barbed tail
+    const hide = new THREE.MeshLambertMaterial({ color: '#6b5240', flatShading: true });
+    const membrane = new THREE.MeshLambertMaterial({ color: '#3a2b22', flatShading: true, side: THREE.DoubleSide });
+    const dark = new THREE.MeshLambertMaterial({ color: '#241a14' });
+    this.flashMats = [hide, membrane, dark];
 
-    const body = new THREE.Mesh(new THREE.SphereGeometry(1.7, 10, 8), grey);
-    body.scale.set(0.9, 0.8, 1.6);
+    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 1), hide);
+    body.scale.set(0.85, 0.8, 1.7);
     body.castShadow = true;
     this.root.add(body);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.9, 10, 8), grey);
-    head.position.set(0, 0.5, -2.3);
+    // neck sweeping forward to a horned head
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.75, 1.9, 7), hide);
+    neck.position.set(0, 0.55, -1.7); neck.rotation.x = 1.15;
+    this.root.add(neck);
+    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.72, 0), hide);
+    head.scale.set(0.9, 0.8, 1.3);
+    head.position.set(0, 0.95, -2.7);
     this.root.add(head);
-    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.6, 6),
-      new THREE.MeshLambertMaterial({ color: '#f2a65a' }));
-    beak.rotation.x = -Math.PI / 2;
-    beak.position.set(0, 0.4, -3.6);
-    this.root.add(beak);
+    const jaw = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.4, 5), dark);
+    jaw.rotation.x = -Math.PI / 2; jaw.position.set(0, 0.75, -3.6);
+    this.root.add(jaw);
     for (const s of [-1, 1]) {
-      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.14, 0.16),
-        new THREE.MeshLambertMaterial({ color: '#1d2033' }));
-      brow.position.set(s * 0.5, 1.05, -2.6);
-      brow.rotation.z = -s * 0.5;
-      this.root.add(brow);
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6),
-        new THREE.MeshBasicMaterial({ color: '#ff2e3f' }));
-      eye.position.set(s * 0.5, 0.75, -2.7);
+      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.9, 5), dark);
+      horn.position.set(s * 0.35, 1.5, -2.5); horn.rotation.z = s * 0.4; horn.rotation.x = -0.5;
+      this.root.add(horn);
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6),
+        new THREE.MeshBasicMaterial({ color: '#ff8a1e' }));
+      eye.position.set(s * 0.42, 1.05, -3.0);
       this.root.add(eye);
     }
+    // barbed tail: tapering segments trailing behind
+    for (let i = 0; i < 4; i++) {
+      const seg = new THREE.Mesh(new THREE.ConeGeometry(0.4 - i * 0.08, 1.1, 6), hide);
+      seg.rotation.x = Math.PI / 2; seg.position.set(0, 0.15 + i * 0.05, 1.6 + i * 0.95);
+      this.root.add(seg);
+    }
+    const barb = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1.0, 4), dark);
+    barb.rotation.x = -Math.PI / 2; barb.position.set(0, 0.35, 5.6);
+    this.root.add(barb);
+    // membrane wings: leading-edge bone + finger struts + a stretched membrane,
+    // all on a group that pivots at the shoulder so the flap still works
     this.wings = [];
     for (const s of [-1, 1]) {
-      const wing = new THREE.Mesh(new THREE.BoxGeometry(0.32, 1.2, 4.6), dark);
-      wing.geometry.translate(0, 0, 0);
       const g = new THREE.Group();
-      g.position.set(s * 1.5, 0.4, 0);
-      wing.position.set(s * 1.6, 0, 0.3);
-      wing.rotation.y = s * 0.25;
-      g.add(wing);
+      g.position.set(s * 1.0, 0.5, -0.3);
+      const bone = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.1, 4.6, 6), dark);
+      bone.rotation.z = Math.PI / 2; bone.position.set(s * 2.3, 0, 0);
+      g.add(bone);
+      const mem = new THREE.Mesh(new THREE.ConeGeometry(2.4, 4.4, 3), membrane);
+      mem.rotation.z = s * Math.PI / 2; mem.rotation.y = Math.PI; mem.scale.set(1, 1, 0.08);
+      mem.position.set(s * 2.2, -0.1, 0.7);
+      g.add(mem);
+      for (let f = 0; f < 3; f++) {
+        const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.05, 3.0, 5), dark);
+        strut.position.set(s * (1.2 + f * 1.0), -0.3, 0.9);
+        strut.rotation.x = -0.5; strut.rotation.z = s * 0.2;
+        g.add(strut);
+      }
       this.root.add(g);
       this.wings.push({ g, s });
     }

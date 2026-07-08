@@ -16,18 +16,43 @@ class Sfx {
     this.ctx = new AC();
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.5;
+    this.sfxGain = this.ctx.createGain();
+    this.sfxGain.gain.value = 1;
+    this.sfxGain.connect(this.master);
     this.master.connect(this.ctx.destination);
+    // shared reverb send: big impacts bloom into the concrete canyon of the
+    // ruined city instead of firing dry. Small UI blips stay dry (verb=0).
+    this.reverbSend = null;
+    try {
+      const rate = this.ctx.sampleRate;
+      const len = Math.floor(rate * 1.6);
+      const ir = this.ctx.createBuffer(2, len, rate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = ir.getChannelData(ch);
+        for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.6);
+      }
+      const conv = this.ctx.createConvolver(); conv.buffer = ir;
+      const wet = this.ctx.createGain(); wet.gain.value = 0.6;
+      conv.connect(wet); wet.connect(this.master);
+      this.reverbSend = this.ctx.createGain(); this.reverbSend.gain.value = 1;
+      this.reverbSend.connect(conv);
+    } catch (e) { /* no convolver: run dry */ }
   }
 
   now() { return this.ctx.currentTime; }
 
-  env(node, t0, attack, peak, decay) {
+  env(node, t0, attack, peak, decay, verb = 0) {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.0001, t0);
     g.gain.exponentialRampToValueAtTime(peak, t0 + attack);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + attack + decay);
     node.connect(g);
-    g.connect(this.master);
+    g.connect(this.sfxGain || this.master);
+    // parallel reverb send for weighty/impact sounds
+    if (verb > 0 && this.reverbSend) {
+      const s = this.ctx.createGain(); s.gain.value = verb;
+      g.connect(s); s.connect(this.reverbSend);
+    }
     return g;
   }
 
@@ -70,7 +95,7 @@ class Sfx {
     const t = this.now();
     const o = this.osc('sine', 52 * (big > 1 ? 0.8 : 1), t, 0.25);
     o.frequency.exponentialRampToValueAtTime(28, t + 0.22);
-    this.env(o, t, 0.005, 0.9 * big, 0.24);
+    this.env(o, t, 0.005, 0.9 * big, 0.24, 0.22);
     const n = this.noise(t, 0.08);
     const f = this.ctx.createBiquadFilter();
     f.type = 'lowpass'; f.frequency.value = 300;
@@ -99,7 +124,7 @@ class Sfx {
     }
     const sub = this.osc('sine', 55, t, 0.3);
     sub.frequency.exponentialRampToValueAtTime(30, t + 0.26);
-    this.env(sub, t, 0.004, 0.9 * strong, 0.28);
+    this.env(sub, t, 0.004, 0.9 * strong, 0.28, 0.3);
     const n = this.noise(t, 0.12);
     this.env(n, t, 0.002, 0.5 * strong, 0.1);
   }
@@ -161,7 +186,7 @@ class Sfx {
     const lfo = this.osc('sine', 30, t, dur);
     const lg = this.ctx.createGain(); lg.gain.value = 60;
     lfo.connect(lg); lg.connect(o.frequency);
-    this.env(o, t, 0.02, 0.4, dur);
+    this.env(o, t, 0.02, 0.4, dur, 0.3);
     const n = this.noise(t, dur);
     const f = this.ctx.createBiquadFilter();
     f.type = 'highpass'; f.frequency.value = 2000;
@@ -187,7 +212,7 @@ class Sfx {
     const lfo = this.osc('sine', 16, t, 0.6);
     const lg = this.ctx.createGain(); lg.gain.value = 30;
     lfo.connect(lg); lg.connect(o.frequency);
-    this.env(o, t, 0.04, 0.4, 0.55);
+    this.env(o, t, 0.04, 0.4, 0.55, 0.4);
   }
 
   coo() { // pigeon. it's still a pigeon.
@@ -205,7 +230,7 @@ class Sfx {
     const t = this.now();
     const o = this.osc('sine', 300, t, 0.5);
     o.frequency.exponentialRampToValueAtTime(50, t + 0.45);
-    this.env(o, t, 0.01, 0.5, 0.45);
+    this.env(o, t, 0.01, 0.5, 0.45, 0.3);
     const n = this.noise(t, 0.2);
     const f = this.ctx.createBiquadFilter();
     f.type = 'lowpass'; f.frequency.value = 800;
@@ -274,7 +299,7 @@ class Sfx {
     const f = this.ctx.createBiquadFilter();
     f.type = 'lowpass'; f.frequency.value = 900;
     n.connect(f);
-    this.env(f, t, 0.005, 0.6 * big, 0.45);
+    this.env(f, t, 0.005, 0.6 * big, 0.45, 0.4);
   }
 
   rocket() {
@@ -286,7 +311,7 @@ class Sfx {
     f.frequency.exponentialRampToValueAtTime(2000, t + 0.45);
     f.Q.value = 2;
     n.connect(f);
-    this.env(f, t, 0.01, 0.4, 0.45);
+    this.env(f, t, 0.01, 0.4, 0.45, 0.3);
   }
 
   pop() { // balloon

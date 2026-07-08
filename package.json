@@ -6,7 +6,9 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node test/server-logic.test.js && node test/rooms.test.js"
+    "test": "node test/server-logic.test.js && node test/rooms.test.js && node test/e2e.test.js",
+    "playtest": "node test/playtest-bot.test.js",
+    "qa": "npm test && npm run playtest"
   },
   "engines": {
     "node": ">=18"

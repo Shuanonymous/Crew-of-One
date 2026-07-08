@@ -30,10 +30,11 @@ export class BrawlGame {
     this.nextId = 1;
 
     this.time = 0;            // seconds survived — THE danger clock
-    this.spawnPoints = 0;     // spawner wallet
-    this.graceT = 8;          // a breath before the first spawns
+    // test hook: seed the spawn wallet so a monster appears at once (QA)
+    this.spawnPoints = Number(process.env.COO_TEST_SPAWN) || 0;
+    this.graceT = process.env.COO_TEST_SPAWN ? 0 : 8; // a breath before the first spawns
     this.bossSpawned = new Set();
-    this.credits = 0;
+    this.credits = Number(process.env.COO_TEST_CREDITS) || 0;
     this.creditsEarned = 0;
     this.kills = 0;
     this.buyCounts = {};      // shop tier pricing
@@ -191,7 +192,6 @@ export class BrawlGame {
   }
 
   buy(itemId) {
-    if (!this.nearBeacon) return { ok: false, reason: 'no supply beacon in range' };
     const item = SHOP.find((s) => s.id === itemId);
     if (!item) return { ok: false, reason: 'unknown item' };
     const up = this.mech.upgrades;
@@ -226,11 +226,13 @@ export class BrawlGame {
     }
     if (roles.includes(ROLE.ARM_R)) {
       if (typeof data.punchR === 'boolean') inp.punchR = data.punchR;
+      if (typeof data.spin === 'boolean') inp.spin = data.spin;
       if (typeof data.aimYaw === 'number') inp.armYawR = data.aimYaw;
       if (typeof data.aimPitch === 'number') inp.armPitchR = data.aimPitch;
     }
     if (roles.includes(ROLE.HEAD)) {
       if (typeof data.fire === 'boolean') inp.fire = data.fire;
+      if (typeof data.launch === 'boolean') inp.launch = data.launch;
       if (typeof data.aimYaw === 'number') inp.headYaw = data.aimYaw;
       if (typeof data.aimPitch === 'number') inp.headPitch = data.aimPitch;
     }
@@ -336,7 +338,7 @@ export class BrawlGame {
   worldInfo() {
     return {
       city: this.cityDefs, mode: 'brawl', seed: this.seed, props: this.carDefs,
-      beacons: this.inter.beacons, tanks: this.inter.tanks.map((t) => ({ id: t.id, p: t.p })),
+      tanks: this.inter.tanks.map((t) => ({ id: t.id, p: t.p })),
       stations: this.inter.stations.map((s) => ({ id: s.id, p: s.p })),
       caches: this.inter.caches.map((c) => ({ id: c.id, p: c.p })),
       worldHalf: WORLD_HALF,
@@ -352,8 +354,8 @@ export class BrawlGame {
       runTime: Math.round(this.time * 10) / 10,
       danger: Math.round(this.dangerLevel * 100) / 100,
       credits: this.credits,
-      shopOpen: !!this.nearBeacon,
-      beaconId: this.nearBeacon?.id || null,
+      shopOpen: true,
+      shopAvailable: true,
       prices: Object.fromEntries(SHOP.map((it) => [it.id, this.priceOf(it)])),
       mechs: [this.mech.snapshot()],
       monsters: this.monsters.map((m) => m.snapshot()),

@@ -12,6 +12,7 @@ export class Input {
     this.mouseL = false;
     this.mouseR = false;
     this.locked = false;
+    this.sensitivity = 1;
     this.roles = [];
     this.active = false; // only send inputs while in a game
     this.sendTimer = null;
@@ -25,8 +26,8 @@ export class Input {
 
     document.addEventListener('mousemove', (e) => {
       if (!this.locked) return;
-      this.yaw -= e.movementX * 0.0024;
-      this.pitch -= e.movementY * 0.0021;
+      this.yaw -= e.movementX * 0.0024 * this.sensitivity;
+      this.pitch -= e.movementY * 0.0021 * this.sensitivity;
       this.pitch = Math.max(-0.9, Math.min(0.85, this.pitch));
     });
     document.addEventListener('mousedown', (e) => {
@@ -97,6 +98,10 @@ export class Input {
       data.punchR = this.mouseL || this.mouseR || k.has('KeyJ') || k.has('KeyK');
     }
     if (this.has(ROLE.HEAD)) data.fire = (hasL || hasR) ? k.has('KeyE') : this.mouseL;
+    // Ranged: ARMS hold right-click (or C) spins the rotary cannon;
+    // HEAD taps R to launch a rocket from the pods.
+    if (hasR || hasL) data.spin = this.mouseR || k.has('KeyC');
+    if (this.has(ROLE.HEAD)) data.launch = k.has('KeyR');
 
     this.net.sendInput(data);
   }

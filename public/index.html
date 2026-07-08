@@ -126,6 +126,7 @@
 
     <div id="wave-pill" class="hud-pill">WAVE 1</div>
     <div id="credits-pill" class="hud-pill">© 0</div>
+    <button id="btn-upgrades" class="hud-action hidden">UPGRADES (B)</button>
     <div id="duel-hp-wrap" class="hidden">
       <div class="hud-label">ENEMY MECH</div>
       <div id="duel-hp-bar"><div id="duel-hp-fill"></div></div>
@@ -193,6 +194,8 @@
       <label>Graphics quality
         <select id="set-quality"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
       </label>
+      <label>Camera sensitivity <input id="set-sens" type="range" min="0.3" max="2.5" step="0.1" value="1" /></label>
+      <label>SFX volume <input id="set-sfxvol" type="range" min="0" max="1" step="0.05" value="0.5" /></label>
       <div class="keybinds">
         <b>KEYBINDS</b>
         <span><i>WASD</i> walk · <i>SPACE</i> kick · <i>F</i> dash (with thrusters)</span>

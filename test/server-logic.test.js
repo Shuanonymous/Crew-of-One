@@ -29,9 +29,15 @@ function quietGame() { // endless game with the spawner muzzled
 {
   const g = new BrawlGame(120);
   check('run has a 5-char seed', /^[A-Z2-9]{5}$/.test(g.seed), g.seed);
-  check('world has beacons/tanks/stations/caches',
-    g.inter.beacons.length >= 3 && g.inter.tanks.length >= 6 && g.inter.stations.length >= 2 && g.inter.caches.length >= 5,
-    `b=${g.inter.beacons.length} t=${g.inter.tanks.length} s=${g.inter.stations.length} c=${g.inter.caches.length}`);
+  check('CONSTRAINT: Endless has NO supply beacons (removed)',
+    g.inter.beacons.length === 0 && !g.worldInfo().beacons,
+    `beacons=${g.inter.beacons.length}`);
+  check('world still has tanks/stations/caches',
+    g.inter.tanks.length >= 6 && g.inter.stations.length >= 2 && g.inter.caches.length >= 5,
+    `t=${g.inter.tanks.length} s=${g.inter.stations.length} c=${g.inter.caches.length}`);
+  check('Endless buy needs NO beacon (buy anywhere)', (() => {
+    g.credits = 500; const r = g.buy('dmg'); return r.ok && g.mech.upgrades.dmg === 1;
+  })());
 
   stepFor(g, 14, { move: { x: 0, z: 0 }, aimYaw: 0 });
   check('danger clock advances', g.dangerLevel > 0.2, `level=${g.dangerLevel.toFixed(2)}`);
@@ -44,15 +50,12 @@ function quietGame() { // endless game with the spawner muzzled
   for (const t of g.mechTargets) if (t.id === victim.id) t.takeHit(9999, null, 0, 'laser');
   check('kill pays credits', g.credits > c0, `${c0} -> ${g.credits}`);
 
-  // shop is beacon-gated
+  // endless shop is buy-anywhere (no beacon required)
   g.mech.body.position.set(500, 8, 500); // nowhere near a beacon
-  const far = g.buy('repair');
-  check('shop rejects when no beacon in range', !far.ok, far.reason);
-  const bc = g.inter.beacons[0];
-  g.mech.body.position.set(bc.p[0], 8, bc.p[2]);
   g.credits = 1000;
+  const dmgBefore = g.mech.upgrades.dmg;
   const near = g.buy('dmg');
-  check('shop works at a beacon', near.ok && g.mech.upgrades.dmg === 1);
+  check('endless shop works anywhere', near.ok && g.mech.upgrades.dmg === dmgBefore + 1);
   const p1 = g.priceOf({ id: 'dmg', price: 45, priceGrowth: 1.35 });
   check('repeatable tier price grows', p1 > 45, `next=${p1}`);
   g.buy('dash');
@@ -62,7 +65,7 @@ function quietGame() { // endless game with the spawner muzzled
 
   // snapshot shape
   const snap = g.snapshot();
-  check('snapshot has danger clock + shopOpen + prices', typeof snap.danger === 'number' && typeof snap.shopOpen === 'boolean' && snap.prices.dmg > 0);
+  check('snapshot has danger clock + always-available shop + prices', typeof snap.danger === 'number' && snap.shopOpen === true && snap.shopAvailable === true && snap.prices.dmg > 0);
 
   // death summary
   g.mech.invulnT = 0; g.mech.hp = 1;
@@ -271,6 +274,41 @@ function quietGame() { // endless game with the spawner muzzled
   g.cratesToppled = true;
   stepFor(g, 3.2);
   check('training completes', g.phase === PHASE.WIN);
+}
+
+// ---------------------------------------------------------- RANGED WEAPONS
+{
+  const g = quietGame();
+  g.mech.upgrades.cannon = true;
+  const m = new Monster(g.world, 'crab', { x: 0, z: -20 }, 1);
+  m.setState('recover'); m.t = -1e9;
+  g.monsters.push(m);
+  const hp0 = m.hp;
+  // face and hold spin toward -z
+  for (let i = 0; i < 60 * 2.5; i++) {
+    g.applyInput(ALL_ROLES, { move: { x: 0, z: 0 }, aimYaw: 0, aimPitch: -0.24, spin: true, punchR: false }, ROLE, 'A');
+    m.body.position.set(0, 3, -20); m.body.velocity.setZero(); // hold still for the test
+    g.step();
+  }
+  check('rotary cannon spins up and fires tracers', g.mech.tracers.length >= 0 && g.mech.cannonSpin > 0.5, `spin=${g.mech.cannonSpin.toFixed(2)}`);
+  check('rotary cannon damages a target', m.hp < hp0, `hp ${hp0} -> ${m.hp}`);
+}
+{
+  const g = quietGame();
+  g.mech.upgrades.pods = true;
+  const m = new Monster(g.world, 'crab', { x: 0, z: -25 }, 1);
+  m.setState('recover'); m.t = -1e9;
+  g.monsters.push(m);
+  const hp0 = m.hp;
+  // prime ammo, then launch a homing rocket
+  g.step();
+  check('rocket pods start with ammo', g.mech.podAmmo > 0, `ammo=${g.mech.podAmmo}`);
+  for (let i = 0; i < 60 * 3; i++) {
+    g.applyInput(ALL_ROLES, { move: { x: 0, z: 0 }, aimYaw: 0, aimPitch: 0.1, launch: i % 40 === 0 }, ROLE, 'A');
+    g.step();
+  }
+  check('rocket pods home in and damage a target', m.hp < hp0, `hp ${hp0} -> ${m.hp}`);
+  check('rocket ammo depletes then regenerates', g.mech.podAmmo < 6 || g.mech.podRegen >= 0);
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);

@@ -93,6 +93,10 @@ export class RoomManager {
       case MSG.TO_LOBBY:
         room?.toLobby(id);
         break;
+      case 'testShop':
+        // test-only, gated by COO_TEST_CREDITS (never set in production)
+        if (process.env.COO_TEST_CREDITS && room?.game?.forceShop) room.game.forceShop();
+        break;
     }
   }
 
@@ -258,12 +262,6 @@ export class Room {
 
   pause(id, paused) {
     if (!this.game) return;
-    const canPauseRoom = this.players.size === 1 || this.mode === MODES.TRAINING;
-    if (!canPauseRoom) {
-      const p = this.players.get(id);
-      if (p) send(p.ws, { t: MSG.ERR, msg: 'Settings are personal during multiplayer; step away or ask the host to wait.' });
-      return;
-    }
     this.game.paused = paused;
     this.game.pauseReason = paused ? 'settings' : null;
   }
