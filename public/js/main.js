@@ -365,6 +365,8 @@ function handleEvents(snap) {
       case 'trainingDone': sfx.fanfare(); break;
       case 'splat': sfx.splat(); if (ev.p) renderer.burst(ev.p, '#9dff5c', 10, 8); if (ev.hit) renderer.shake(0.4); break;
       case 'carHit': sfx.clang(0.7); if (ev.p) renderer.burst(ev.p, '#8ad6e6', 8, 12); break;
+      case 'bldgHit': if (ev.p) { renderer.dust(ev.p, 7); } break;
+      case 'bldgDown': renderer.collapseBuilding(ev.id, true); sfx.crash(1.7); hitstop(60); break;
     }
   }
 }

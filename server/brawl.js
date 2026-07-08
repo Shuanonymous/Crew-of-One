@@ -19,11 +19,15 @@ export class BrawlGame {
     const city = buildCity(this.world, this.seed);
     this.cityDefs = city.defs;
     this.inter = city.interactables;
+    this.buildings = city.buildings || [];
+    this.downedBuildings = [];   // cumulative ids, sent in every snapshot
     const cars = buildCars(this.world);
     this.cars = cars.bodies;
     this.carDefs = cars.defs;
 
     this.mech = new Mech(this.world, 'mech1', { x: 0, y: 8, z: 0 }, '#8a93a6');
+    // every mech impact (fist, kick, rocket, beam) also lands on the city
+    this.mech.onWorldHit = (p, kind, dmg) => this.hitWorld(p, kind, dmg);
     this.monsters = [];
     this.projectiles = [];
     this.pickups = [];        // credit drops: { id, p, value, t }
@@ -115,6 +119,43 @@ export class BrawlGame {
       }
     }
     if (this.mech.body.position.distanceTo(p) < 12) this.mech.takeHit(18, p, 1600);
+    // the blast levels nearby structures
+    this.damageBuildingsAt(p, 14, 260);
+  }
+
+  // ------------------------------------------- destructible city blocks
+  // Impacts route here with a kind; each kind hits structures differently.
+  hitWorld(p, kind, dmg = 0) {
+    if (kind === 'punch') this.damageBuildingsAt(p, 4.5, 70);
+    else if (kind === 'kick') this.damageBuildingsAt(p, 5.5, 95);
+    else if (kind === 'rocket') this.damageBuildingsAt(p, 7, 75);
+    else if (kind === 'laser') this.damageBuildingsAt(p, 3, dmg * 5, true);
+  }
+
+  damageBuildingsAt(p, radius, dmg, quiet = false) {
+    const px = p.x ?? p[0], py = p.y ?? p[1] ?? 2, pz = p.z ?? p[2];
+    for (const b of this.buildings) {
+      if (!b.alive) continue;
+      const [w, h, d] = b.def.size;
+      // distance from the impact to the building footprint (AABB in XZ)
+      const dx = Math.max(0, Math.abs(px - b.def.p[0]) - w / 2);
+      const dz = Math.max(0, Math.abs(pz - b.def.p[2]) - d / 2);
+      if (Math.hypot(dx, dz) > radius || py > h + radius) continue;
+      b.hp -= dmg;
+      if (b.hp <= 0) {
+        this.collapseBuilding(b);
+      } else if (!quiet) {
+        // dust/debris feedback so structures feel hit before they fall
+        this.events.push({ what: 'bldgHit', p: [r2(px), r2(Math.min(py, h)), r2(pz)] });
+      }
+    }
+  }
+
+  collapseBuilding(b) {
+    b.alive = false;
+    this.world.removeBody(b.body);
+    this.downedBuildings.push(b.id);
+    this.events.push({ what: 'bldgDown', id: b.id, p: b.def.p, size: b.def.size });
   }
 
   onKill(m) {
@@ -265,6 +306,16 @@ export class BrawlGame {
     }
     this.monsters = this.monsters.filter((m) => !m.removed);
 
+    // the big kaiju bulldoze straight through city blocks (checked at 4 Hz)
+    if (this.tick % 15 === 0) {
+      for (const m of this.monsters) {
+        if (!m.alive) continue;
+        if (m.bossName || m.type === 'tank') {
+          this.damageBuildingsAt(m.body.position, (m.radius || 2) + 2, 55);
+        }
+      }
+    }
+
     for (const pj of this.projectiles) {
       pj.t += dt;
       pj.v.y -= 20 * dt;
@@ -371,6 +422,7 @@ export class BrawlGame {
         p: [r2(c.position.x), r2(c.position.y), r2(c.position.z)],
         q: [r2(c.quaternion.x), r2(c.quaternion.y), r2(c.quaternion.z), r2(c.quaternion.w)],
       })),
+      bldg: this.downedBuildings,
       ev: this.events,
     };
     if (bossMon) snap.bossBar = { name: bossMon.bossName, hp: Math.round(bossMon.hp), maxHp: bossMon.maxHp };

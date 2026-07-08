@@ -428,7 +428,13 @@ export class Renderer {
   buildWorld(world) {
     this.clearWorld();
     const g = this.worldGroup;
-    this.batches = { body: {}, roof: {} }; // color -> geometry list
+    // destructible buildings: defs are kept so the batched city meshes can
+    // be rebuilt (minus the fallen) whenever the server fells one
+    this.bldgDefs = [];
+    this.bldgDown = new Set();
+    this.bldgDeco = new Map();
+    this.bldgBatchMeshes = [];
+    this.bldgMats = new Map();
 
     for (const d of world.city) {
       if (d.kind === 'ground') {
@@ -469,29 +475,12 @@ export class Renderer {
         cap.position.set(d.p[0], d.p[1] + d.size[1] / 2 + 2, d.p[2]);
         g.add(cap);
       } else if (d.kind === 'building') {
-        // batch: one merged mesh per color = a handful of draw calls total
-        const box = new THREE.BoxGeometry(...d.size);
-        if (d.yaw) box.rotateY(d.yaw);
-        box.translate(...d.p);
-        (this.batches.body[d.color] = this.batches.body[d.color] || []).push(box);
-        const roof = new THREE.BoxGeometry(d.size[0] + 0.7, 0.8, d.size[2] + 0.7);
-        if (d.yaw) roof.rotateY(d.yaw);
-        roof.translate(d.p[0], d.p[1] + d.size[1] / 2 + 0.4, d.p[2]);
-        (this.batches.roof[d.color] = this.batches.roof[d.color] || []).push(roof);
+        this.bldgDefs.push(d);
         this.decorateBuilding(g, d);
       }
     }
-    for (const [color, geos] of Object.entries(this.batches.body)) {
-      const mesh = new THREE.Mesh(mergeGeometries(geos),
-        new THREE.MeshLambertMaterial({ color, map: this.windowTex }));
-      mesh.castShadow = mesh.receiveShadow = true;
-      g.add(mesh);
-    }
-    for (const [color, geos] of Object.entries(this.batches.roof)) {
-      const mesh = new THREE.Mesh(mergeGeometries(geos),
-        new THREE.MeshLambertMaterial({ color: shade(color, 0.72) }));
-      g.add(mesh);
-    }
+    // batch: one merged mesh per color = a handful of draw calls total
+    this.rebuildBuildingBatches();
 
     // ---- war damage: a kaiju has been through here. Broken rooflines,
     // rubble mounds, exposed rebar, scattered debris. All merged into a
@@ -631,8 +620,11 @@ export class Renderer {
       const rng = mulberry32(h);
       const [w, bh, dp] = d.size;
       const topY = d.p[1] + bh / 2;
-      // ~55% of buildings are visibly wrecked
+      // ~55% of buildings are visibly wrecked. Anything attached to the
+      // structure itself (roof teeth, facade scars, roof rebar) merges into
+      // that building's deco group so it falls WITH the building.
       if (h % 100 < 55) {
+        const attached = [];
         // broken, jagged roofline: uneven concrete teeth around the top edge
         const teeth = 3 + (h % 4);
         for (let i = 0; i < teeth; i++) {
@@ -640,13 +632,20 @@ export class Renderer {
           const th = 1.5 + rng() * (bh * 0.14);
           const ex = (rng() - 0.5) * (w - tw);
           const ez = (rng() - 0.5) * (dp - tw);
-          pushBox(concrete, tw, th, tw, d.p[0] + ex, topY + th / 2 - 0.4, d.p[2] + ez, 0, rng() * 0.6, (rng() - 0.5) * 0.25);
-          if (rng() < 0.5) pushBox(rebarGeos, 0.08, th * 1.5, 0.08, d.p[0] + ex, topY + th * 0.9, d.p[2] + ez, (rng() - 0.5) * 0.4, 0, (rng() - 0.5) * 0.4);
+          pushBox(attached, tw, th, tw, d.p[0] + ex, topY + th / 2 - 0.4, d.p[2] + ez, 0, rng() * 0.6, (rng() - 0.5) * 0.25);
+          if (rng() < 0.5) pushBox(attached, 0.08, th * 1.5, 0.08, d.p[0] + ex, topY + th * 0.9, d.p[2] + ez, (rng() - 0.5) * 0.4, 0, (rng() - 0.5) * 0.4);
         }
         // gouged blast scar partway up the facade (a dark recessed chunk)
         if (h % 3 === 0 && bh > 16) {
           const sy = d.p[1] + (rng() - 0.3) * bh * 0.4;
-          pushBox(concrete, w * 0.3, bh * 0.16, 1.2, d.p[0] + (rng() - 0.5) * w * 0.4, sy, d.p[2] + dp / 2, 0, 0, (rng() - 0.5) * 0.3);
+          pushBox(attached, w * 0.3, bh * 0.16, 1.2, d.p[0] + (rng() - 0.5) * w * 0.4, sy, d.p[2] + dp / 2, 0, 0, (rng() - 0.5) * 0.3);
+        }
+        if (attached.length) {
+          const m = new THREE.Mesh(mergeGeometries(attached),
+            new THREE.MeshStandardMaterial({ color: '#4a4854', metalness: 0.1, roughness: 0.95, flatShading: true }));
+          m.castShadow = true;
+          const deco = this.bldgDeco?.get(d.id);
+          (deco || g).add(m);
         }
       }
       // rubble mound at the base for most buildings
@@ -692,8 +691,99 @@ export class Renderer {
     }
   }
 
-  // client-side rooftop garnish: water towers, AC units, antennas, neon
-  decorateBuilding(g, d) {
+  // Re-merge the standing buildings into a few draw calls. Called at world
+  // build and again whenever the server fells one (rare, so the merge cost
+  // is invisible).
+  rebuildBuildingBatches() {
+    const g = this.worldGroup;
+    for (const m of this.bldgBatchMeshes) { g.remove(m); m.geometry.dispose(); }
+    this.bldgBatchMeshes = [];
+    const body = {}, roof = {};
+    for (const d of this.bldgDefs) {
+      if (this.bldgDown.has(d.id)) continue;
+      const box = new THREE.BoxGeometry(...d.size);
+      if (d.yaw) box.rotateY(d.yaw);
+      box.translate(...d.p);
+      (body[d.color] = body[d.color] || []).push(box);
+      const rf = new THREE.BoxGeometry(d.size[0] + 0.7, 0.8, d.size[2] + 0.7);
+      if (d.yaw) rf.rotateY(d.yaw);
+      rf.translate(d.p[0], d.p[1] + d.size[1] / 2 + 0.4, d.p[2]);
+      (roof[d.color] = roof[d.color] || []).push(rf);
+    }
+    const matFor = (key, make) => {
+      if (!this.bldgMats.has(key)) this.bldgMats.set(key, make());
+      return this.bldgMats.get(key);
+    };
+    for (const [color, geos] of Object.entries(body)) {
+      const mesh = new THREE.Mesh(mergeGeometries(geos),
+        matFor('b' + color, () => new THREE.MeshLambertMaterial({ color, map: this.windowTex })));
+      mesh.castShadow = mesh.receiveShadow = true;
+      g.add(mesh);
+      this.bldgBatchMeshes.push(mesh);
+    }
+    for (const [color, geos] of Object.entries(roof)) {
+      const mesh = new THREE.Mesh(mergeGeometries(geos),
+        matFor('r' + color, () => new THREE.MeshLambertMaterial({ color: shade(color, 0.72) })));
+      g.add(mesh);
+      this.bldgBatchMeshes.push(mesh);
+    }
+  }
+
+  // A building falls: pull it from the skyline, drop a rubble mound in its
+  // footprint, and (when it happens on-screen, not from a catch-up
+  // snapshot) throw dust, smoke and a shockwave.
+  collapseBuilding(id, vfx = true) {
+    if (!this.bldgDown || this.bldgDown.has(id)) return;
+    const d = this.bldgDefs.find((x) => x.id === id);
+    if (!d) return;
+    this.bldgDown.add(id);
+    this.rebuildBuildingBatches();
+    const deco = this.bldgDeco.get(id);
+    if (deco) this.worldGroup.remove(deco);
+
+    const [w, h, dd] = d.size;
+    const rng = mulberry32(hashStr('fall' + id));
+    const chunks = [];
+    const slab = (cw, ch, cd, x, y, z, ry, rz) => {
+      const b = new THREE.BoxGeometry(cw, ch, cd);
+      b.rotateY(ry); b.rotateZ(rz);
+      b.translate(x, y, z);
+      chunks.push(b);
+    };
+    // central heap + slumped slabs leaning outward
+    slab(w * 0.6, 1.6 + h * 0.08, dd * 0.6, d.p[0], (1.6 + h * 0.08) / 2, d.p[2], rng() * 1, 0);
+    const n = 5 + (hashStr(id) % 4);
+    for (let i = 0; i < n; i++) {
+      const cw = 1.5 + rng() * w * 0.4;
+      const ch = 0.8 + rng() * 2.2;
+      slab(cw, ch, cw * (0.5 + rng() * 0.8),
+        d.p[0] + (rng() - 0.5) * w * 0.9, ch / 2, d.p[2] + (rng() - 0.5) * dd * 0.9,
+        rng() * Math.PI, (rng() - 0.5) * 0.5);
+    }
+    const rubble = new THREE.Mesh(mergeGeometries(chunks),
+      new THREE.MeshStandardMaterial({ color: '#46434f', roughness: 0.95, metalness: 0.06, flatShading: true }));
+    rubble.castShadow = rubble.receiveShadow = true;
+    this.worldGroup.add(rubble);
+
+    if (vfx) {
+      const p = [d.p[0], 1, d.p[2]];
+      this.dust([d.p[0], 7, d.p[2]], 30);
+      this.ring(p, '#8b8496', Math.max(w, dd) * 1.4, 0.9);
+      for (let i = 0; i < 7; i++) {
+        this.smoke([d.p[0] + (Math.random() - 0.5) * w, 2 + Math.random() * h * 0.35,
+          d.p[2] + (Math.random() - 0.5) * dd]);
+      }
+      this.shake(0.65);
+    }
+  }
+
+  // client-side rooftop garnish: water towers, AC units, antennas, neon.
+  // Everything goes into a per-building group so it vanishes when the
+  // building comes down.
+  decorateBuilding(parent, d) {
+    const g = new THREE.Group();
+    parent.add(g);
+    if (d.id != null && this.bldgDeco) this.bldgDeco.set(d.id, g);
     const h = hashStr(d.p[0] + ',' + d.p[2]);
     const topY = d.p[1] + d.size[1] / 2;
     if (h % 5 === 0) {
@@ -860,6 +950,9 @@ export class Renderer {
       b.inter.caches?.forEach((alive, i) => { if (this.cacheViews[i]) this.cacheViews[i].visible = alive; });
       b.inter.stations?.forEach((st, i) => { if (this.stationViews[i]) this.stationViews[i].visible = st.alive; });
     }
+    // downed buildings: snapshot state is the source of truth (idempotent;
+    // the bldgDown event supplies the collapse VFX when it happens live)
+    if (b.bldg) for (const id of b.bldg) this.collapseBuilding(id, false);
     if (b.crates && this.crateMeshes.length) {
       b.crates.forEach((c, i) => {
         const mesh = this.crateMeshes[i];
