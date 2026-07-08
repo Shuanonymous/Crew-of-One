@@ -58,6 +58,15 @@ function show(screen) {
 let freezeT = 0;
 function hitstop(ms) { freezeT = Math.max(freezeT, ms / 1000); }
 
+// dynamic mix: world sounds attenuate with distance from the camera, so a
+// roar across the district reads as far away and one beside you fills the mix
+function dv(p, ref = 35) {
+  if (!p || !renderer.camPos) return 1;
+  const c = renderer.camPos;
+  const d = Math.hypot(p[0] - c.x, (p[1] || 0) - c.y, p[2] - c.z);
+  return Math.max(0.12, Math.min(1, ref / Math.max(1, d)));
+}
+
 // floating damage numbers (DOM — crisp text, cheap, auto-cleaned)
 function dmgNumber(p, dmg, cls = '') {
   const s = renderer.worldToScreen(p);
@@ -327,20 +336,20 @@ function handleEvents(snap) {
       switch (ev.what) {
         case 'roar':
           if (mon.type === 'pigeon') sfx.coo();
-          else if (mon.type === 'flyer') sfx.screech(1.2);
-          else sfx.roar(ROAR_PITCH[mon.type] || 0.9);
+          else if (mon.type === 'flyer') sfx.screech(1.2, dv(mon.p, 55));
+          else sfx.roar(ROAR_PITCH[mon.type] || 0.9, dv(mon.p, mon.type === 'boss' ? 90 : 55));
           break;
         case 'telegraph':
-          if (ev.kind === 'dive') sfx.screech(1);
+          if (ev.kind === 'dive') sfx.screech(1, dv(mon.p, 55));
           else if (mon.type === 'pigeon') sfx.coo();
-          else sfx.roar((ROAR_PITCH[mon.type] || 0.9) * 1.2);
+          else sfx.roar((ROAR_PITCH[mon.type] || 0.9) * 1.2, dv(mon.p, 55));
           break;
         case 'hit': renderer.flashMonster(mon.id); renderer.burst(mon.p, '#ffd166', 6, 10); break;
-        case 'die': sfx.squish(); renderer.burst(mon.p, '#e2543e', mon.type === 'boss' ? 40 : 20, 16); if (mon.type === 'boss') { renderer.ring(mon.p, '#ffd166', 24, 0.9); renderer.shake(1); } break;
+        case 'die': sfx.squish(dv(mon.p, 45)); renderer.burst(mon.p, '#e2543e', mon.type === 'boss' ? 40 : 20, 16); if (mon.type === 'boss') { renderer.ring(mon.p, '#ffd166', 24, 0.9); renderer.shake(1); } break;
         case 'gustHit': renderer.shake(0.7); toast('FLAP FLAP FLAP'); break;
         case 'slam': sfx.crash(2); renderer.shake(1.2); if (ev.p) renderer.ring(ev.p, '#ff7b5c', ev.range || 17, 0.8); break;
         case 'summon': toast('IT CALLED FOR BACKUP'); sfx.roar(1.5); break;
-        case 'spit': sfx.splat(); break;
+        case 'spit': sfx.splat(dv(mon.p, 40)); break;
         case 'latch': sfx.roar(2.6); break;
         case 'strikeHit': break;
       }
@@ -351,7 +360,7 @@ function handleEvents(snap) {
       case 'kill': sfx.ding(); toast(`+${ev.credits}© ${KILL_TEXT[ev.type] || 'KAIJU DOWN'}`); break;
       case 'runStart': banner(`SECTOR ${ev.seed} — SURVIVE`, 3000); break;
       case 'bossArrives': banner(`⚠ ${ev.name} ⚠`, 3800); sfx.roar(0.3); renderer.shake(0.8); break;
-      case 'tankBoom': sfx.crash(1.8); renderer.shake(0.8); if (ev.p) { renderer.ring(ev.p, '#ff9d4d', 15, 0.7); renderer.burst(ev.p, '#ff9d4d', 26, 20); renderer.scorch(ev.p, 5); } break;
+      case 'tankBoom': sfx.crash(1.8 * dv(ev.p, 60)); renderer.shake(0.8 * dv(ev.p, 60)); if (ev.p) { renderer.ring(ev.p, '#ff9d4d', 15, 0.7); renderer.burst(ev.p, '#ff9d4d', 26, 20); renderer.scorch(ev.p, 5); } break;
       case 'cacheOpen': sfx.buy(); toast(`SUPPLY CACHE +${ev.credits}©`); break;
       case 'pickup': sfx.ding(); break;
       case 'stationDown': toast('REPAIR STATION DESTROYED'); sfx.crash(1); break;
@@ -363,10 +372,16 @@ function handleEvents(snap) {
       case 'balloonPop': sfx.pop(); toast('POP!'); break;
       case 'cratesToppled': sfx.clang(1.2); toast('TIMBERRR!'); break;
       case 'trainingDone': sfx.fanfare(); break;
-      case 'splat': sfx.splat(); if (ev.p) renderer.burst(ev.p, '#9dff5c', 10, 8); if (ev.hit) renderer.shake(0.4); break;
-      case 'carHit': sfx.clang(0.7); if (ev.p) renderer.burst(ev.p, '#8ad6e6', 8, 12); break;
-      case 'bldgHit': if (ev.p) { renderer.dust(ev.p, 7); } break;
-      case 'bldgDown': renderer.collapseBuilding(ev.id, true); sfx.crash(1.7); hitstop(60); break;
+      case 'splat': sfx.splat(dv(ev.p, 40)); if (ev.p) renderer.burst(ev.p, '#9dff5c', 10, 8); if (ev.hit) renderer.shake(0.4); break;
+      case 'carHit': sfx.clang(0.7 * dv(ev.p, 35)); if (ev.p) renderer.burst(ev.p, '#8ad6e6', 8, 12); break;
+      case 'bldgHit': if (ev.p) {
+        renderer.dust(ev.p, 7);
+        for (let i = 0; i < 3; i++) {
+          const a = Math.random() * Math.PI * 2;
+          renderer.debrisChunk(ev.p, [Math.cos(a) * 7, 5 + Math.random() * 6, Math.sin(a) * 7], 0.35 + Math.random() * 0.4);
+        }
+      } break;
+      case 'bldgDown': renderer.collapseBuilding(ev.id, true); sfx.crash(1.7 * dv(ev.p, 70)); hitstop(60); break;
     }
   }
 }

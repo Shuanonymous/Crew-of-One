@@ -366,10 +366,52 @@ export class Renderer {
     if (scorches.length > 26) { const old = scorches[0]; old.t = old.dur; }
   }
 
+  // ballistic concrete chunk: tumbles out of a collapse, bounces once,
+  // settles into the rubble and fades
+  debrisChunk(p, v, size = 1) {
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(size, size * (0.6 + Math.random() * 0.7), size * (0.5 + Math.random())),
+      new THREE.MeshStandardMaterial({ color: '#4a4854', roughness: 0.95, metalness: 0.06, flatShading: true, transparent: true })
+    );
+    m.position.set(p[0], p[1], p[2]);
+    m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    m.castShadow = true;
+    this.scene.add(m);
+    this.effects.push({
+      m, t: 0, dur: 2.6, kind: 'chunk',
+      v: new V3(v[0], v[1], v[2]),
+      rv: { x: (Math.random() - 0.5) * 9, z: (Math.random() - 0.5) * 9 },
+      half: size * 0.4, grounded: false,
+    });
+    const chunks = this.effects.filter((e) => e.kind === 'chunk');
+    if (chunks.length > 40) chunks[0].t = chunks[0].dur;
+  }
+
   stepEffects(dt) {
     for (const e of this.effects) {
       e.t += dt;
       const k = e.t / e.dur;
+      if (e.kind === 'chunk') {
+        if (!e.grounded) {
+          e.v.y -= 42 * dt;
+          e.m.position.addScaledVector(e.v, dt);
+          e.m.rotation.x += e.rv.x * dt;
+          e.m.rotation.z += e.rv.z * dt;
+          if (e.m.position.y <= e.half) {
+            e.m.position.y = e.half;
+            if (Math.abs(e.v.y) > 9) {
+              e.v.y = Math.abs(e.v.y) * 0.35;         // one hard bounce
+              e.v.x *= 0.5; e.v.z *= 0.5;
+              e.rv.x *= 0.5; e.rv.z *= 0.5;
+            } else {
+              e.grounded = true;                       // settle in the rubble
+            }
+          }
+        }
+        e.m.material.opacity = k < 0.75 ? 1 : 1 - (k - 0.75) / 0.25;
+        if (e.t >= e.dur) this.scene.remove(e.m);
+        continue;
+      }
       if (e.kind === 'ring') {
         const s = 1 + (e.maxR - 1) * easeOut(Math.min(1, k));
         e.m.scale.set(s, s, 1);
@@ -481,14 +523,30 @@ export class Renderer {
         mesh.position.set(d.p[0], d.p[1], d.p[2]);
         g.add(mesh);
       } else if (d.kind === 'landmark') {
-        const mesh = new THREE.Mesh(new THREE.BoxGeometry(...d.size),
-          new THREE.MeshLambertMaterial({ color: d.color, map: this.windowTex }));
-        mesh.position.set(...d.p);
-        mesh.castShadow = true;
-        g.add(mesh);
-        const cap = new THREE.Mesh(new THREE.SphereGeometry(2.2, 8, 6),
+        // tiered corporate tower: setbacks, a crown, an antenna mast
+        const [lw, lh, ld] = d.size;
+        const mat = new THREE.MeshLambertMaterial({ color: d.color, map: this.windowTex });
+        const trim = new THREE.MeshStandardMaterial({ color: '#39415c', metalness: 0.7, roughness: 0.4 });
+        const baseY = d.p[1] - lh / 2;
+        const tiers = [[1.0, 0.58], [0.78, 0.26], [0.55, 0.13]];
+        let ty = baseY;
+        for (const [scale, frac] of tiers) {
+          const th = lh * frac;
+          const tier = new THREE.Mesh(new THREE.BoxGeometry(lw * scale, th, ld * scale), mat);
+          tier.position.set(d.p[0], ty + th / 2, d.p[2]);
+          tier.castShadow = true;
+          g.add(tier);
+          const ledge = new THREE.Mesh(new THREE.BoxGeometry(lw * scale + 0.8, 0.7, ld * scale + 0.8), trim);
+          ledge.position.set(d.p[0], ty + th, d.p[2]);
+          g.add(ledge);
+          ty += th;
+        }
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.4, lh * 0.14, 8), trim);
+        mast.position.set(d.p[0], ty + lh * 0.07, d.p[2]);
+        g.add(mast);
+        const cap = new THREE.Mesh(new THREE.SphereGeometry(1.1, 8, 6),
           new THREE.MeshBasicMaterial({ color: '#ff4d5e' }));
-        cap.position.set(d.p[0], d.p[1] + d.size[1] / 2 + 2, d.p[2]);
+        cap.position.set(d.p[0], ty + lh * 0.14 + 1, d.p[2]);
         g.add(cap);
       } else if (d.kind === 'building') {
         this.bldgDefs.push(d);
@@ -524,37 +582,96 @@ export class Renderer {
     }
     this.tankViews = [];
     for (const t of world.tanks || []) {
-      const m = new THREE.Mesh(new THREE.CylinderGeometry(2, 2.2, 4.5, 10),
-        new THREE.MeshLambertMaterial({ color: '#b8622e' }));
-      m.position.set(t.p[0], 2.2, t.p[2]);
-      m.castShadow = true;
-      g.add(m);
-      this.tankViews.push(m);
+      // industrial fuel tank: ribbed pressure vessel with hazard band
+      const grp = new THREE.Group();
+      const shell = new THREE.MeshStandardMaterial({ color: '#b8622e', metalness: 0.6, roughness: 0.45 });
+      const steel = new THREE.MeshStandardMaterial({ color: '#3a3f4d', metalness: 0.8, roughness: 0.35 });
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 3.8, 12), shell);
+      body.position.y = 2.1; body.castShadow = true;
+      grp.add(body);
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(2, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), shell);
+      dome.position.y = 4.0;
+      grp.add(dome);
+      for (const ry of [1.1, 3.1]) {
+        const rib = new THREE.Mesh(new THREE.CylinderGeometry(2.12, 2.12, 0.22, 12), steel);
+        rib.position.y = ry;
+        grp.add(rib);
+      }
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(2.06, 2.06, 0.5, 12),
+        new THREE.MeshStandardMaterial({ color: '#1a1206', emissive: new THREE.Color('#ff8a1e'), emissiveIntensity: 1.1, roughness: 0.5 }));
+      band.position.y = 2.1;
+      grp.add(band);
+      const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 2.4, 8), steel);
+      pipe.position.set(1.4, 4.6, 0); pipe.rotation.z = 0.5;
+      grp.add(pipe);
+      const valve = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.1, 6, 12), steel);
+      valve.position.set(0, 4.9, 0); valve.rotation.x = Math.PI / 2;
+      grp.add(valve);
+      grp.position.set(t.p[0], 0, t.p[2]);
+      g.add(grp);
+      this.tankViews.push(grp);
     }
     this.stationViews = [];
     for (const s of world.stations || []) {
+      // field repair bay: deck plate, perimeter pylons with emissive tips,
+      // and a slowly-spinning holo cross overhead
       const grp = new THREE.Group();
-      const pad = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 0.5, 20),
-        new THREE.MeshLambertMaterial({ color: '#1d3a4a' }));
+      const steel = new THREE.MeshStandardMaterial({ color: '#24404f', metalness: 0.7, roughness: 0.4 });
+      const pad = new THREE.Mesh(new THREE.CylinderGeometry(9, 9.6, 0.5, 20), steel);
       pad.position.y = 0.25;
+      grp.add(pad);
       const glow = new THREE.Mesh(new THREE.RingGeometry(7.5, 8.6, 30),
         new THREE.MeshBasicMaterial({ color: '#5cff8f', transparent: true, opacity: 0.5, side: THREE.DoubleSide }));
       glow.rotation.x = -Math.PI / 2;
       glow.position.y = 0.6;
-      grp.add(pad, glow);
+      grp.add(glow);
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + 0.4;
+        const py = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, 4.2, 8), steel);
+        py.position.set(Math.cos(a) * 8.2, 2.1, Math.sin(a) * 8.2);
+        grp.add(py);
+        const tip = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 6),
+          new THREE.MeshBasicMaterial({ color: '#5cff8f' }));
+        tip.position.set(Math.cos(a) * 8.2, 4.4, Math.sin(a) * 8.2);
+        grp.add(tip);
+      }
+      // holo cross (two additive bars; spins in applySample via userData)
+      const holo = new THREE.Group();
+      const hm = new THREE.MeshBasicMaterial({ color: '#5cff8f', transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
+      holo.add(new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.0, 0.3), hm));
+      holo.add(new THREE.Mesh(new THREE.BoxGeometry(1.0, 3.2, 0.3), hm));
+      holo.position.y = 7;
+      grp.add(holo);
+      grp.userData.holo = holo;
       grp.position.set(s.p[0], 0, s.p[2]);
       g.add(grp);
       this.stationViews.push(grp);
     }
     this.cacheViews = [];
     for (const c of world.caches || []) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3),
-        new THREE.MeshLambertMaterial({ color: '#8f7a2e' }));
-      m.position.set(c.p[0], 1.5, c.p[2]);
-      m.rotation.y = 0.5;
-      m.castShadow = true;
-      g.add(m);
-      this.cacheViews.push(m);
+      // armored supply crate: frame edges, glowing seam, stenciled lid
+      const grp = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3),
+        new THREE.MeshStandardMaterial({ color: '#8f7a2e', metalness: 0.55, roughness: 0.5 }));
+      body.castShadow = true;
+      grp.add(body);
+      const frame = new THREE.MeshStandardMaterial({ color: '#3d3524', metalness: 0.7, roughness: 0.4 });
+      for (const [rx, rz] of [[0, 0], [Math.PI / 2, 0], [0, Math.PI / 2]]) {
+        const edge = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.4, 0.4), frame);
+        edge.rotation.set(rx, 0, rz);
+        grp.add(edge);
+      }
+      const seam = new THREE.Mesh(new THREE.BoxGeometry(3.06, 0.18, 3.06),
+        new THREE.MeshBasicMaterial({ color: '#ffd166' }));
+      seam.position.y = 0.6;
+      grp.add(seam);
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.25, 2.2), frame);
+      lid.position.y = 1.55;
+      grp.add(lid);
+      grp.position.set(c.p[0], 1.5, c.p[2]);
+      grp.rotation.y = 0.5;
+      g.add(grp);
+      this.cacheViews.push(grp);
     }
     this.pickupMeshes = new Map();
 
@@ -598,21 +715,43 @@ export class Renderer {
       }
     }
 
-    // dynamic props from the server (puntable cars)
+    // dynamic props from the server (puntable cars) — real little cars now:
+    // metallic paint, glass cabin, four wheels, head/tail lights
     this.propMeshes.clear();
     for (const d of world.props || []) {
       const car = new THREE.Group();
+      const [w, h, dp] = d.size;
       const body = new THREE.Mesh(
-        new THREE.BoxGeometry(d.size[0], d.size[1] * 0.6, d.size[2]),
-        new THREE.MeshLambertMaterial({ color: d.color })
+        new THREE.BoxGeometry(w, h * 0.55, dp),
+        new THREE.MeshStandardMaterial({ color: d.color, metalness: 0.75, roughness: 0.3, envMapIntensity: 1.2 })
       );
+      body.position.y = 0.1;
       body.castShadow = true;
+      car.add(body);
       const cabin = new THREE.Mesh(
-        new THREE.BoxGeometry(d.size[0] * 0.55, d.size[1] * 0.5, d.size[2] * 0.85),
-        new THREE.MeshLambertMaterial({ color: '#1d2033' })
+        new THREE.BoxGeometry(w * 0.5, h * 0.45, dp * 0.82),
+        new THREE.MeshStandardMaterial({ color: '#0e1a26', metalness: 0.4, roughness: 0.12, envMapIntensity: 1.5 })
       );
-      cabin.position.y = d.size[1] * 0.5;
-      car.add(body, cabin);
+      cabin.position.set(-w * 0.06, h * 0.42, 0);
+      car.add(cabin);
+      const wheelG = new THREE.CylinderGeometry(h * 0.28, h * 0.28, 0.24, 10);
+      const wheelM = new THREE.MeshStandardMaterial({ color: '#15161c', metalness: 0.3, roughness: 0.8 });
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        const wh = new THREE.Mesh(wheelG, wheelM);
+        wh.rotation.x = Math.PI / 2;
+        wh.position.set(sx * w * 0.32, -h * 0.18, sz * (dp / 2 - 0.02));
+        car.add(wh);
+      }
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 0.4),
+        new THREE.MeshBasicMaterial({ color: '#ffeebb' }));
+      head.position.set(w / 2 - 0.02, 0.12, 0);
+      head.scale.z = dp * 1.4;
+      car.add(head);
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.36),
+        new THREE.MeshBasicMaterial({ color: '#ff4444' }));
+      tail.position.set(-w / 2 + 0.02, 0.12, 0);
+      tail.scale.z = dp * 1.4;
+      car.add(tail);
       g.add(car);
       this.propMeshes.set(d.id, car);
     }
@@ -789,6 +928,16 @@ export class Renderer {
         this.smoke([d.p[0] + (Math.random() - 0.5) * w, 2 + Math.random() * h * 0.35,
           d.p[2] + (Math.random() - 0.5) * dd]);
       }
+      // ballistic chunks blown out of the falling structure
+      const nCh = Math.min(12, 6 + Math.round(h / 8));
+      for (let i = 0; i < nCh; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const sp = 6 + Math.random() * 14;
+        this.debrisChunk(
+          [d.p[0] + (Math.random() - 0.5) * w * 0.7, 2 + Math.random() * h * 0.6, d.p[2] + (Math.random() - 0.5) * dd * 0.7],
+          [Math.cos(a) * sp, 4 + Math.random() * 10, Math.sin(a) * sp],
+          0.7 + Math.random() * 1.3);
+      }
       this.shake(0.65);
     }
   }
@@ -964,7 +1113,12 @@ export class Renderer {
     if (b.inter) {
       b.inter.tanks?.forEach((alive, i) => { if (this.tankViews[i]) this.tankViews[i].visible = alive; });
       b.inter.caches?.forEach((alive, i) => { if (this.cacheViews[i]) this.cacheViews[i].visible = alive; });
-      b.inter.stations?.forEach((st, i) => { if (this.stationViews[i]) this.stationViews[i].visible = st.alive; });
+      b.inter.stations?.forEach((st, i) => {
+        const v = this.stationViews[i];
+        if (!v) return;
+        v.visible = st.alive;
+        if (v.userData.holo) { v.userData.holo.rotation.y += dt * 1.2; v.userData.holo.position.y = 7 + Math.sin(performance.now() / 600) * 0.4; }
+      });
     }
     // downed buildings: snapshot state is the source of truth (idempotent;
     // the bldgDown event supplies the collapse VFX when it happens live)
@@ -1842,24 +1996,43 @@ class SwarmView {
     this.scene = scene;
     this.root = new THREE.Group();
     scene.add(this.root);
-    const skin = new THREE.MeshLambertMaterial({ color: '#c86bd6' });
-    this.flashMats = [skin];
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.75, 8, 6), skin);
+    // dozens on screen at once, so it stays cheap — but it reads as a
+    // spined parasite now, not a bouncing ball
+    const skin = new THREE.MeshLambertMaterial({ color: '#a44fb5', flatShading: true });
+    const dark = new THREE.MeshLambertMaterial({ color: '#5c2468', flatShading: true });
+    this.flashMats = [skin, dark];
+    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.75, 0), skin);
+    body.scale.set(1, 0.9, 1.15);
     body.castShadow = true;
     this.root.add(body);
+    // dorsal spines
+    for (let i = 0; i < 3; i++) {
+      const sp = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.55, 4), dark);
+      sp.position.set(0, 0.6 - i * 0.12, -0.25 + i * 0.35);
+      sp.rotation.x = -0.4 + i * 0.35;
+      this.root.add(sp);
+    }
+    // single furious cyclops eye
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6),
-      new THREE.MeshBasicMaterial({ color: '#ff2e3f' }));
-    eye.position.set(0, 0.25, -0.55);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.15, 6, 6),
+      new THREE.MeshBasicMaterial({ color: '#ffcf3f' }));
+    eye.position.set(0, 0.22, -0.6);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.14, 6, 6),
       new THREE.MeshLambertMaterial({ color: '#1d2033' }));
-    pupil.position.z = -0.2;
+    pupil.position.z = -0.22;
     eye.add(pupil);
     this.root.add(eye);
+    // needle-teeth underbite
+    for (const s of [-1, 0, 1]) {
+      const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.28, 4), dark);
+      tooth.position.set(s * 0.22, -0.32, -0.62);
+      tooth.rotation.x = 0.5;
+      this.root.add(tooth);
+    }
     this.legs = [];
     for (const s of [-1, 1]) {
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.2),
-        new THREE.MeshLambertMaterial({ color: '#7a3a85' }));
-      leg.position.set(s * 0.4, -0.75, 0);
+      const leg = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.75, 4), dark);
+      leg.position.set(s * 0.42, -0.7, 0);
+      leg.rotation.x = Math.PI; // point down
       this.root.add(leg);
       this.legs.push(leg);
     }
@@ -2091,15 +2264,35 @@ function makeSkyTexture() {
 }
 
 function makeWindowTexture() {
+  // higher-detail facade sheet: concrete mottling, floor bands, and varied
+  // windows — some lit warm, some cool TV-glow, most dark with subtle sheen
   const cv = document.createElement('canvas');
-  cv.width = 64; cv.height = 128;
+  cv.width = 128; cv.height = 256;
   const ctx = cv.getContext('2d');
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, 64, 128);
-  for (let y = 8; y < 120; y += 14) {
-    for (let x = 6; x < 58; x += 12) {
-      ctx.fillStyle = Math.random() < 0.22 ? '#ffe9b0' : 'rgba(30,34,60,0.55)';
-      ctx.fillRect(x, y, 7, 9);
+  ctx.fillStyle = '#e8e6e2';
+  ctx.fillRect(0, 0, 128, 256);
+  // concrete mottling
+  for (let i = 0; i < 260; i++) {
+    ctx.fillStyle = `rgba(${90 + Math.random() * 60},${90 + Math.random() * 60},${100 + Math.random() * 60},0.06)`;
+    ctx.fillRect(Math.random() * 128, Math.random() * 256, 3 + Math.random() * 9, 3 + Math.random() * 9);
+  }
+  // floor slabs
+  for (let y = 0; y < 256; y += 28) {
+    ctx.fillStyle = 'rgba(40,44,66,0.35)';
+    ctx.fillRect(0, y, 128, 3);
+  }
+  // window grid with mullions and varied lighting
+  for (let y = 8; y < 244; y += 28) {
+    for (let x = 6; x < 118; x += 15) {
+      const r = Math.random();
+      if (r < 0.14) ctx.fillStyle = '#ffe9b0';                       // warm lit
+      else if (r < 0.2) ctx.fillStyle = '#9fd4ff';                   // cool tv glow
+      else if (r < 0.26) ctx.fillStyle = 'rgba(255,233,176,0.35)';   // dim
+      else ctx.fillStyle = 'rgba(22,26,48,0.68)';                    // dark glass
+      ctx.fillRect(x, y + 5, 10, 16);
+      // mullion split
+      ctx.fillStyle = 'rgba(30,34,56,0.5)';
+      ctx.fillRect(x + 4, y + 5, 1.5, 16);
     }
   }
   const tex = new THREE.CanvasTexture(cv);

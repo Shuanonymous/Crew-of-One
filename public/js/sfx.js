@@ -136,25 +136,25 @@ class Sfx {
     this.env(o, t, 0.002, 0.22, 0.08);
   }
 
-  splat() { // spitter glob lands
+  splat(v = 1) { // spitter glob lands
     if (!this.ready() || !this.gate('splat', 2)) return;
     const t = this.now();
     const o = this.osc('sine', 220, t, 0.25);
     o.frequency.exponentialRampToValueAtTime(60, t + 0.2);
-    this.env(o, t, 0.005, 0.4, 0.22);
+    this.env(o, t, 0.005, 0.4 * v, 0.22);
     const n = this.noise(t, 0.18);
     const f = this.ctx.createBiquadFilter();
     f.type = 'lowpass'; f.frequency.value = 1200;
     n.connect(f);
-    this.env(f, t, 0.004, 0.35, 0.16);
+    this.env(f, t, 0.004, 0.35 * v, 0.16);
   }
 
-  screech(pitch = 1) { // flyer dive
+  screech(pitch = 1, v = 1) { // flyer dive
     if (!this.ready() || !this.gate('screech', 2)) return;
     const t = this.now();
     const o = this.osc('sawtooth', 900 * pitch, t, 0.5);
     o.frequency.exponentialRampToValueAtTime(420 * pitch, t + 0.45);
-    this.env(o, t, 0.02, 0.22, 0.45);
+    this.env(o, t, 0.02, 0.22 * v, 0.45);
   }
 
   laserCharge(dur = 3) {
@@ -203,7 +203,7 @@ class Sfx {
     this.env(o, t, 0.01, 0.2, 0.28);
   }
 
-  roar(pitch = 1) { // monster spawn/telegraph
+  roar(pitch = 1, v = 1) { // monster spawn/telegraph
     if (!this.ready() || !this.gate('roar')) return;
     const t = this.now();
     const o = this.osc('sawtooth', 110 * pitch, t, 0.6);
@@ -212,7 +212,7 @@ class Sfx {
     const lfo = this.osc('sine', 16, t, 0.6);
     const lg = this.ctx.createGain(); lg.gain.value = 30;
     lfo.connect(lg); lg.connect(o.frequency);
-    this.env(o, t, 0.04, 0.4, 0.55, 0.4);
+    this.env(o, t, 0.04, 0.4 * v, 0.55, 0.4);
   }
 
   coo() { // pigeon. it's still a pigeon.
@@ -225,17 +225,17 @@ class Sfx {
     }
   }
 
-  squish() { // monster dies
+  squish(v = 1) { // monster dies
     if (!this.ready() || !this.gate('squish')) return;
     const t = this.now();
     const o = this.osc('sine', 300, t, 0.5);
     o.frequency.exponentialRampToValueAtTime(50, t + 0.45);
-    this.env(o, t, 0.01, 0.5, 0.45, 0.3);
+    this.env(o, t, 0.01, 0.5 * v, 0.45, 0.3);
     const n = this.noise(t, 0.2);
     const f = this.ctx.createBiquadFilter();
     f.type = 'lowpass'; f.frequency.value = 800;
     n.connect(f);
-    this.env(f, t, 0.01, 0.3, 0.18);
+    this.env(f, t, 0.01, 0.3 * v, 0.18);
   }
 
   hurt() { // mech takes a hit
