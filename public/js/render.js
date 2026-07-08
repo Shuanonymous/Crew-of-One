@@ -2085,35 +2085,44 @@ class PigeonView {
     this.root = new THREE.Group();
     scene.add(this.root);
 
-    const grey = new THREE.MeshLambertMaterial({ color: '#9aa3b2' });
-    const lite = new THREE.MeshLambertMaterial({ color: '#c6ccd6' });
-    const green = new THREE.MeshLambertMaterial({ color: '#4d8f6b' });
-    this.flashMats = [grey, lite, green];
+    const grey = new THREE.MeshLambertMaterial({ color: '#9aa3b2', flatShading: true });
+    const lite = new THREE.MeshLambertMaterial({ color: '#c6ccd6', flatShading: true });
+    // iridescent neck sheen — the one truly premium feature of any pigeon
+    const green = new THREE.MeshStandardMaterial({ color: '#3d7a5a', metalness: 0.8, roughness: 0.25, emissive: new THREE.Color('#1a4d38'), emissiveIntensity: 0.4 });
+    this.flashMats = [grey, lite];
     this.flashT = 0;
 
-    const body = new THREE.Mesh(new THREE.SphereGeometry(2.9, 10, 8), grey);
+    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(2.9, 1), grey);
     body.scale.set(1, 0.95, 1.25);
     body.castShadow = true;
     body.position.y = 0.4;
     this.root.add(body);
-    const chest = new THREE.Mesh(new THREE.SphereGeometry(2.1, 10, 8), lite);
+    const chest = new THREE.Mesh(new THREE.IcosahedronGeometry(2.1, 1), lite);
     chest.position.set(0, -0.2, -1.4);
     this.root.add(chest);
 
-    // tail
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.5, 2.6), grey);
-    tail.position.set(0, 0.8, 3.4);
-    tail.rotation.x = 0.35;
-    this.root.add(tail);
+    // fanned tail: overlapping feather slats
+    for (let i = -2; i <= 2; i++) {
+      const feather = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.18, 2.8), i % 2 ? grey : lite);
+      feather.position.set(i * 0.62, 0.8 + Math.abs(i) * 0.08, 3.4 + Math.abs(i) * -0.25);
+      feather.rotation.x = 0.35;
+      feather.rotation.y = i * 0.16;
+      this.root.add(feather);
+    }
 
-    // wings
+    // wings: layered primary feathers on a shoulder pivot
     this.wings = [];
     for (const s of [-1, 1]) {
-      const wing = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.8, 3.6), grey);
-      wing.geometry.translate(0, -0.9, 0);
+      const wing = new THREE.Group();
+      for (let f = 0; f < 4; f++) {
+        const fe = new THREE.Mesh(new THREE.BoxGeometry(0.32, 1.7 - f * 0.18, 3.4 - f * 0.5), f % 2 ? grey : lite);
+        fe.position.set(s * f * 0.3, -0.85, 0.2 + f * 0.28);
+        fe.rotation.y = s * f * 0.09;
+        fe.castShadow = f === 0;
+        wing.add(fe);
+      }
       wing.position.set(s * 2.7, 1.6, 0.4);
       wing.rotation.z = s * 0.5;
-      wing.castShadow = true;
       this.root.add(wing);
       this.wings.push({ mesh: wing, s });
     }

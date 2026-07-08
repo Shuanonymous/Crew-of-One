@@ -187,9 +187,28 @@ APIs are isolated to UI files (localStorage settings, pointer lock,
 WebAudio) — all shimmable in Electron. Ship = wrap client in Electron and
 run the Node server as a child process (or point at the hosted server).
 
+## Shipped in the cinematic overhaul (latest)
+- Authored models everywhere: detailed mech (reactor core, pauldrons,
+  T-visor, digitigrade legs, hydraulic-ram arms), organic kaiju (spiked
+  crab family incl. boss/tank/rusher, membrane-wing wyvern, acid-toad
+  spitter, spined swarmlings, feathered pigeon), detailed props (ribbed
+  fuel tanks, holo repair bays, armored caches, tiered landmark towers,
+  cars with wheels/lights).
+- Destructible city: buildings have HP server-side; fists, kicks,
+  rockets, the laser, tank blasts and bulldozing bosses fell them --
+  physics body removed, rubble + ballistic debris chunks client-side,
+  snapshot-synced for late joiners. Test hook: `COO_TEST_SPAWN` env
+  seeds the spawner + skips the grace period (off in production).
+- Procedural texture PBR: mottled window facades, asphalt with grain,
+  cracks and mirror-puddle roughness maps.
+- Dynamic weather: gusting wind-blown rain, breathing fog, lightning
+  with delayed thunder.
+- Dynamic sound: danger-driven adaptive score (hall reverb, sub-bass,
+  boss war-toms), reverb-sent impact SFX, distance-attenuated world mix.
+
 ## Known gaps / next milestones (honest)
 - Rapier physics port (currently cannon-es).
 - District-partitioned world + compass/minimap.
-- Texture-mapped PBR (scratches/normals), motion blur, film grain,
+- Normal/scratch maps on the mech itself, motion blur, film grain,
   helicopter/street-light scale props.
 - Recorded/hybrid live-instrument score.
