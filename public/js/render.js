@@ -195,6 +195,7 @@ export class Renderer {
     this.sun.castShadow = opts.shadows;
     if (this.bloom) this.bloom.strength = opts.bloom;
     this.scene.fog.far = opts.fog;
+    this.fogBase = opts.fog; // keep the gust-breathing anchored to the new range
     this.emberPts.visible = opts.embers > 0;
     this.rainPts.material.size = opts.pr < 1 ? 0.7 : 0.5;
     this.resize();
@@ -265,10 +266,15 @@ export class Renderer {
       this.applyPalette(this.currentPalette());
     }
     const t = performance.now() / 1000;
-    // rain falls around the camera (single buffer update)
+    // WIND: slow gust cycles drive the rain sideways and make the storm
+    // breathe instead of falling in a static sheet
+    const gust = Math.sin(t * 0.13) * 0.6 + Math.sin(t * 0.047 + 2) * 0.4; // -1..1
+    const windX = gust * 22;
+    // rain falls around the camera (single buffer update), angled by wind
     const rp = this.rainPos;
     for (let i = 0; i < rp.length; i += 3) {
-      rp[i + 1] -= dt * 46;
+      rp[i] += windX * dt;
+      rp[i + 1] -= dt * (42 + Math.abs(gust) * 18);
       if (rp[i + 1] < 0) {
         rp[i] = this.camPos.x + (Math.random() - 0.5) * 150;
         rp[i + 1] = 55 + Math.random() * 10;
@@ -276,16 +282,26 @@ export class Renderer {
       }
     }
     this.rainPts.geometry.attributes.position.needsUpdate = true;
+    this.rainPts.material.opacity = 0.4 + Math.abs(gust) * 0.25;
+    // fog breathes with the gusts — the district closes in and opens up
+    if (this.scene.fog && this.fogBase == null) this.fogBase = this.scene.fog.far;
+    if (this.scene.fog && this.fogBase) this.scene.fog.far = this.fogBase * (1 - Math.abs(gust) * 0.12);
     // searchlights sweep slowly
     for (const s of this.searchlights) {
       s.cone.rotation.z = Math.sin(t * 0.21 + s.ph) * 0.5;
       s.cone.rotation.x = Math.PI + Math.cos(t * 0.17 + s.ph) * 0.35;
     }
-    // horizon lightning: a sudden hemi flash, then decay
+    // horizon lightning: a sudden hemi flash, then decay — with thunder
+    // arriving a beat later (distance sells the scale of the storm)
     this.lightningT -= dt;
     if (this.lightningT <= 0) {
       this.lightningT = 6 + Math.random() * 14;
       this.flash = 1;
+      this.thunderT = 0.4 + Math.random() * 1.4;
+    }
+    if (this.thunderT != null) {
+      this.thunderT -= dt;
+      if (this.thunderT <= 0) { this.thunderT = null; this.thunderReady = true; }
     }
     if (this.flash > 0) {
       this.flash = Math.max(0, this.flash - dt * 3.5);

@@ -690,6 +690,8 @@ function frame(now) {
     renderer.updateCamera(now / 9000, -0.28, null, Math.max(dt, 0.0001));
   }
   renderer.render();
+  // thunder answers the horizon lightning a beat later
+  if (renderer.thunderReady) { renderer.thunderReady = false; if (state.playing) sfx.thunder(); }
   drawPings();
   requestAnimationFrame(frame);
 }

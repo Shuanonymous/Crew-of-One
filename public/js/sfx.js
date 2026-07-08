@@ -320,6 +320,21 @@ class Sfx {
     const n = this.noise(t, 0.08);
     this.env(n, t, 0.001, 0.6, 0.07);
   }
+
+  thunder() { // distant storm — long low rumble with a sub drop
+    if (!this.ready() || !this.gate('thunder', 1)) return;
+    const t = this.now();
+    const n = this.noise(t, 2.2);
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(320, t);
+    f.frequency.exponentialRampToValueAtTime(70, t + 2.0);
+    n.connect(f);
+    this.env(f, t, 0.15, 0.5, 2.0, 0.5);
+    const sub = this.osc('sine', 46, t, 1.6);
+    sub.frequency.exponentialRampToValueAtTime(26, t + 1.4);
+    this.env(sub, t, 0.1, 0.35, 1.5, 0.4);
+  }
 }
 
 export const sfx = new Sfx();
