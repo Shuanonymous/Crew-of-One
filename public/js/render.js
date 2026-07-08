@@ -154,6 +154,11 @@ export class Renderer {
     this.particles = [];
     this.effects = [];             // shockwave rings, scorch marks
     this.windowTex = makeWindowTexture();
+    // repeat in world units (see worldUVBox) instead of stretching one
+    // texture sheet across an entire facade — the old way magnified the
+    // texels into giant blurry "pixels"
+    this.windowTex.wrapS = this.windowTex.wrapT = THREE.RepeatWrapping;
+    this.windowTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
 
     // palette state (lerped on wave changes)
     this.palA = PALETTES[0]; this.palB = PALETTES[0]; this.palT = 1;
@@ -173,7 +178,11 @@ export class Renderer {
       this.scene.environment = pmrem.fromScene(envScene).texture;
     } catch (e) { /* PMREM unsupported: metal falls back to lit-only */ }
 
-    this.composer = new EffectComposer(this.renderer);
+    // multisampled render target: without MSAA samples the whole post
+    // chain renders jagged edges (the single biggest "pixelated" offender)
+    const rtSize = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    const rt = new THREE.WebGLRenderTarget(rtSize.x, rtSize.y, { samples: 4, type: THREE.HalfFloatType });
+    this.composer = new EffectComposer(this.renderer, rt);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.9, 0.6, 0.6);
     this.composer.addPass(this.bloom);
@@ -185,8 +194,10 @@ export class Renderer {
 
   setQuality(q) {
     const opts = {
-      low: { pr: 0.75, shadows: false, bloom: 0, fog: 190, embers: 0 },
-      medium: { pr: 1, shadows: true, bloom: 0.55, fog: 320, embers: 40 },
+      low: { pr: 0.8, shadows: false, bloom: 0, fog: 190, embers: 0 },
+      // render at native device resolution — 1x on a retina display reads
+      // as a blurry, pixelated upscale
+      medium: { pr: Math.min(window.devicePixelRatio, 1.75), shadows: true, bloom: 0.55, fog: 320, embers: 40 },
       high: { pr: Math.min(window.devicePixelRatio, 2), shadows: true, bloom: 0.7, fog: 420, embers: 70 },
     }[q] || {};
     if (!opts.pr) return;
@@ -545,7 +556,8 @@ export class Renderer {
         let ty = baseY;
         for (const [scale, frac] of tiers) {
           const th = lh * frac;
-          const tier = new THREE.Mesh(new THREE.BoxGeometry(lw * scale, th, ld * scale), mat);
+          const tier = new THREE.Mesh(
+            worldUVBox(new THREE.BoxGeometry(lw * scale, th, ld * scale), lw * scale, th, ld * scale), mat);
           tier.position.set(d.p[0], ty + th / 2, d.p[2]);
           tier.castShadow = true;
           g.add(tier);
@@ -564,10 +576,15 @@ export class Renderer {
       } else if (d.kind === 'building') {
         this.bldgDefs.push(d);
         this.decorateBuilding(g, d);
+      } else if (d.kind === 'lamp') {
+        (this._lampDefs = this._lampDefs || []).push(d);
+      } else if (d.kind === 'billboard') {
+        this.addBillboard(g, d);
       }
     }
     // batch: one merged mesh per color = a handful of draw calls total
     this.rebuildBuildingBatches();
+    this.buildStreetFurniture(g);
 
     // ---- war damage: a kaiju has been through here. Broken rooflines,
     // rubble mounds, exposed rebar, scattered debris. All merged into a
@@ -859,6 +876,72 @@ export class Renderer {
     }
   }
 
+  // Street furniture: sodium streetlights along the avenues (merged into
+  // 2 draw calls) and sidewalk plinths under every building (1 draw call).
+  buildStreetFurniture(g) {
+    const lamps = this._lampDefs || [];
+    this._lampDefs = null;
+    if (lamps.length) {
+      const poles = [], heads = [];
+      for (const d of lamps) {
+        const pole = new THREE.CylinderGeometry(0.14, 0.22, 9, 8);
+        pole.translate(d.p[0], 4.5, d.p[2]);
+        poles.push(pole);
+        const arm = new THREE.CylinderGeometry(0.1, 0.1, 2.6, 6);
+        arm.rotateZ(Math.PI / 2);
+        arm.translate(d.p[0] + 1.1, 8.9, d.p[2]);
+        poles.push(arm);
+        const head = new THREE.BoxGeometry(1.0, 0.3, 0.5);
+        head.translate(d.p[0] + 2.2, 8.85, d.p[2]);
+        heads.push(head);
+      }
+      const poleMesh = new THREE.Mesh(mergeGeometries(poles),
+        new THREE.MeshStandardMaterial({ color: '#252a36', metalness: 0.8, roughness: 0.45 }));
+      poleMesh.castShadow = true;
+      g.add(poleMesh);
+      const headMesh = new THREE.Mesh(mergeGeometries(heads),
+        new THREE.MeshBasicMaterial({ color: '#ffca7a' })); // sodium glow — bloom does the halo
+      g.add(headMesh);
+    }
+    // sidewalk plinths: a pale concrete apron around every building
+    // footprint. Static (sidewalks survive the building falling on them).
+    const slabs = [];
+    for (const d of this.bldgDefs) {
+      const [w, , dd] = d.size;
+      const s = new THREE.BoxGeometry(w + 3, 0.28, dd + 3);
+      if (d.yaw) s.rotateY(d.yaw);
+      s.translate(d.p[0], 0.14, d.p[2]);
+      slabs.push(s);
+    }
+    if (slabs.length) {
+      const m = new THREE.Mesh(mergeGeometries(slabs),
+        new THREE.MeshStandardMaterial({ color: '#565b66', metalness: 0.15, roughness: 0.9 }));
+      m.receiveShadow = true;
+      g.add(m);
+    }
+  }
+
+  // Neon ad board bolted to a facade; lives in the building's deco group
+  // so it comes down with the structure.
+  addBillboard(g, d) {
+    if (!this._adTex) {
+      this._adTex = [0, 1, 2].map((v) => makeAdTexture(v));
+    }
+    const grp = new THREE.Group();
+    const [bw, bh] = d.size;
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(bw + 0.5, bh + 0.5, 0.25),
+      new THREE.MeshStandardMaterial({ color: '#1c202c', metalness: 0.7, roughness: 0.5 }));
+    grp.add(frame);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(bw, bh),
+      new THREE.MeshBasicMaterial({ map: this._adTex[d.v % 3] }));
+    face.position.z = 0.16;
+    grp.add(face);
+    grp.position.set(...d.p);
+    if (d.yaw) grp.rotation.y = d.yaw;
+    const deco = d.bldg != null && this.bldgDeco ? this.bldgDeco.get(d.bldg) : null;
+    (deco || g).add(grp);
+  }
+
   // Re-merge the standing buildings into a few draw calls. Called at world
   // build and again whenever the server fells one (rare, so the merge cost
   // is invisible).
@@ -869,7 +952,7 @@ export class Renderer {
     const body = {}, roof = {};
     for (const d of this.bldgDefs) {
       if (this.bldgDown.has(d.id)) continue;
-      const box = new THREE.BoxGeometry(...d.size);
+      const box = worldUVBox(new THREE.BoxGeometry(...d.size), ...d.size);
       if (d.yaw) box.rotateY(d.yaw);
       box.translate(...d.p);
       (body[d.color] = body[d.color] || []).push(box);
@@ -2286,40 +2369,98 @@ function makeSkyTexture() {
 }
 
 function makeWindowTexture() {
-  // higher-detail facade sheet: concrete mottling, floor bands, and varied
-  // windows — some lit warm, some cool TV-glow, most dark with subtle sheen
+  // facade sheet tiled in world units (one tile = 12m x 24m, ~8 floors):
+  // concrete mottling, floor slabs, and varied windows — warm lit, cool
+  // TV-glow, dim, dark glass — at a resolution that stays crisp up close
   const cv = document.createElement('canvas');
-  cv.width = 128; cv.height = 256;
+  cv.width = 256; cv.height = 512;
   const ctx = cv.getContext('2d');
-  ctx.fillStyle = '#e8e6e2';
-  ctx.fillRect(0, 0, 128, 256);
-  // concrete mottling
-  for (let i = 0; i < 260; i++) {
+  ctx.fillStyle = '#dcdad6';
+  ctx.fillRect(0, 0, 256, 512);
+  // concrete mottling + weather streaks
+  for (let i = 0; i < 500; i++) {
     ctx.fillStyle = `rgba(${90 + Math.random() * 60},${90 + Math.random() * 60},${100 + Math.random() * 60},0.06)`;
-    ctx.fillRect(Math.random() * 128, Math.random() * 256, 3 + Math.random() * 9, 3 + Math.random() * 9);
+    ctx.fillRect(Math.random() * 256, Math.random() * 512, 4 + Math.random() * 14, 4 + Math.random() * 14);
   }
-  // floor slabs
-  for (let y = 0; y < 256; y += 28) {
-    ctx.fillStyle = 'rgba(40,44,66,0.35)';
-    ctx.fillRect(0, y, 128, 3);
+  for (let i = 0; i < 22; i++) {
+    const x = Math.random() * 256;
+    ctx.fillStyle = 'rgba(50,54,70,0.08)';
+    ctx.fillRect(x, Math.random() * 200, 2 + Math.random() * 4, 120 + Math.random() * 260);
+  }
+  // floor slabs (8 floors per tile → 3m floors at 24m tile height)
+  for (let y = 0; y < 512; y += 64) {
+    ctx.fillStyle = 'rgba(40,44,66,0.4)';
+    ctx.fillRect(0, y, 256, 6);
   }
   // window grid with mullions and varied lighting
-  for (let y = 8; y < 244; y += 28) {
-    for (let x = 6; x < 118; x += 15) {
+  for (let y = 14; y < 500; y += 64) {
+    for (let x = 10; x < 240; x += 32) {
       const r = Math.random();
-      if (r < 0.14) ctx.fillStyle = '#ffe9b0';                       // warm lit
-      else if (r < 0.2) ctx.fillStyle = '#9fd4ff';                   // cool tv glow
-      else if (r < 0.26) ctx.fillStyle = 'rgba(255,233,176,0.35)';   // dim
-      else ctx.fillStyle = 'rgba(22,26,48,0.68)';                    // dark glass
-      ctx.fillRect(x, y + 5, 10, 16);
-      // mullion split
-      ctx.fillStyle = 'rgba(30,34,56,0.5)';
-      ctx.fillRect(x + 4, y + 5, 1.5, 16);
+      if (r < 0.13) ctx.fillStyle = '#ffe9b0';                       // warm lit
+      else if (r < 0.19) ctx.fillStyle = '#9fd4ff';                  // cool tv glow
+      else if (r < 0.26) ctx.fillStyle = 'rgba(255,233,176,0.32)';   // dim
+      else ctx.fillStyle = 'rgba(20,24,44,0.72)';                    // dark glass
+      ctx.fillRect(x, y + 8, 22, 38);
+      // mullions
+      ctx.fillStyle = 'rgba(30,34,56,0.55)';
+      ctx.fillRect(x + 10, y + 8, 2.5, 38);
+      ctx.fillRect(x, y + 26, 22, 2.5);
+      // sill highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      ctx.fillRect(x, y + 46, 22, 2);
     }
   }
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
+}
+
+function makeAdTexture(variant) {
+  // neon signage: glyph blocks and bars in a signature hue on near-black,
+  // bright enough for the bloom pass to halo it
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = 128;
+  const ctx = cv.getContext('2d');
+  const hue = ['#ff5da2', '#4dfff0', '#ffe14d'][variant % 3];
+  const dim = ['#7a2450', '#1d7a72', '#7a6a1d'][variant % 3];
+  ctx.fillStyle = '#07080e';
+  ctx.fillRect(0, 0, 256, 128);
+  // border tube
+  ctx.strokeStyle = hue; ctx.lineWidth = 5;
+  ctx.strokeRect(8, 8, 240, 112);
+  // glyph blocks (fake lettering — reads as signage at game distance)
+  let x = 26;
+  const seed = mulberry32(9000 + variant);
+  for (let i = 0; i < 7 && x < 210; i++) {
+    const gw = 14 + seed() * 18;
+    ctx.fillStyle = seed() < 0.75 ? hue : dim;
+    if (seed() < 0.5) ctx.fillRect(x, 30, gw, 42);
+    else { ctx.fillRect(x, 30, gw, 12); ctx.fillRect(x, 58, gw, 14); }
+    x += gw + 10;
+  }
+  // underline bar
+  ctx.fillStyle = dim;
+  ctx.fillRect(26, 88, 160 + seed() * 40, 10);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Rescale a BoxGeometry's UVs so a texture tiles in WORLD units (one tile
+// = tileW x tileH meters) instead of stretching once per face. Box face
+// order: +x, -x, +y, -y, +z, -z (4 verts each).
+function worldUVBox(geo, w, h, d, tileW = 12, tileH = 24) {
+  const uv = geo.attributes.uv;
+  for (let i = 0; i < uv.count; i++) {
+    const face = Math.floor(i / 4);
+    let su = 1, sv = 1;
+    if (face === 0 || face === 1) { su = d / tileW; sv = h / tileH; }        // ±x sides
+    else if (face === 2 || face === 3) { su = w / tileW; sv = d / tileW; }   // roof/floor
+    else { su = w / tileW; sv = h / tileH; }                                 // ±z faces
+    uv.setXY(i, uv.getX(i) * su, uv.getY(i) * sv);
+  }
+  uv.needsUpdate = true;
+  return geo;
 }
 
 function makeAsphaltTexture() {

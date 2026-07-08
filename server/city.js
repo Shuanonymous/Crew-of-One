@@ -74,7 +74,29 @@ export function buildCity(world, seed = 'TRAIN') {
         // hp scales with bulk: small shops crumble to a punch or two,
         // big towers take real ordnance
         buildings.push({ id: def.id, body, def, hp: Math.round(40 + (w * d * h) / 70), maxHp: 0, alive: true });
+        // neon billboard on some taller facades (falls with its building)
+        if (h > 22 && rng() < 0.3) {
+          defs.push({
+            kind: 'billboard', bldg: def.id,
+            p: [x, 6 + rng() * (h - 14), z + d / 2 + 0.35],
+            size: [Math.min(9, w * 0.8), 3.4 + rng() * 2.2],
+            v: Math.floor(rng() * 3),
+          });
+        }
       }
+    }
+  }
+
+  // streetlights along the avenues: two per block, opposite corners
+  for (let i = 0; i < blockCenters.length; i++) {
+    const [cx, cz] = blockCenters[i];
+    const off = BLOCK / 2 + 3;
+    const corners = i % 2 === 0
+      ? [[cx - off, cz - off], [cx + off, cz + off]]
+      : [[cx - off, cz + off], [cx + off, cz - off]];
+    for (const [lx, lz] of corners) {
+      if (Math.abs(lx - riverX) < 15) continue; // not in the river
+      defs.push({ kind: 'lamp', p: [lx, 0, lz] });
     }
   }
 
