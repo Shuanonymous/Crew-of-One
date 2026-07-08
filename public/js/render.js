@@ -496,11 +496,24 @@ export class Renderer {
 
     for (const d of world.city) {
       if (d.kind === 'ground') {
-        // rain-slicked asphalt: dark, semi-metallic, low roughness so it
-        // mirrors the neon sky/city through the env map (cinematic wet look)
+        // rain-slicked asphalt with real surface detail: a procedural
+        // asphalt map plus a roughness map full of puddle patches, so the
+        // street is broken mirror where it's wet and grainy where it's dry
+        if (!this.asphaltTex) {
+          this.asphaltTex = makeAsphaltTexture();
+          this.asphaltRough = makeAsphaltRoughness();
+          for (const t of [this.asphaltTex, this.asphaltRough]) {
+            t.wrapS = t.wrapT = THREE.RepeatWrapping;
+            t.repeat.set(26, 26);
+          }
+        }
         const mesh = new THREE.Mesh(
           new THREE.BoxGeometry(...d.size),
-          new THREE.MeshStandardMaterial({ color: '#0e1220', metalness: 0.85, roughness: 0.28, envMapIntensity: 1.2 })
+          new THREE.MeshStandardMaterial({
+            color: '#5a6478', map: this.asphaltTex,
+            metalness: 0.72, roughness: 1.0, roughnessMap: this.asphaltRough,
+            envMapIntensity: 1.25,
+          })
         );
         mesh.position.set(...d.p);
         mesh.receiveShadow = true;
@@ -2298,6 +2311,63 @@ function makeWindowTexture() {
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
+}
+
+function makeAsphaltTexture() {
+  // dark asphalt: speckle grain, larger tonal mottles, hairline cracks
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = 256;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#181c28';
+  ctx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 480; i++) {
+    ctx.fillStyle = `rgba(${120 + Math.random() * 70},${125 + Math.random() * 70},${140 + Math.random() * 70},0.05)`;
+    const s = 4 + Math.random() * 22;
+    ctx.fillRect(Math.random() * 256, Math.random() * 256, s, s * (0.4 + Math.random()));
+  }
+  for (let i = 0; i < 2600; i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.09)';
+    ctx.fillRect(Math.random() * 256, Math.random() * 256, 1.4, 1.4);
+  }
+  // hairline cracks: random dark walks
+  ctx.strokeStyle = 'rgba(6,8,14,0.55)';
+  ctx.lineWidth = 1.1;
+  for (let c = 0; c < 7; c++) {
+    let x = Math.random() * 256, y = Math.random() * 256;
+    ctx.beginPath(); ctx.moveTo(x, y);
+    for (let s = 0; s < 9; s++) {
+      x += (Math.random() - 0.5) * 42; y += (Math.random() - 0.5) * 42;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function makeAsphaltRoughness() {
+  // grayscale roughness: bright = dry grain, dark blobs = mirror puddles
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = 128;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#9a9a9a';
+  ctx.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 900; i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
+    ctx.fillRect(Math.random() * 128, Math.random() * 128, 2, 2);
+  }
+  for (let p = 0; p < 9; p++) {
+    const px = Math.random() * 128, py = Math.random() * 128;
+    for (let b = 0; b < 6; b++) {
+      ctx.fillStyle = 'rgba(28,28,28,0.5)';
+      ctx.beginPath();
+      ctx.ellipse(px + (Math.random() - 0.5) * 16, py + (Math.random() - 0.5) * 16,
+        4 + Math.random() * 9, 3 + Math.random() * 6, Math.random() * 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  return new THREE.CanvasTexture(cv);
 }
 
 function placeSegment(mesh, a, b, radiusScale = 1) {
