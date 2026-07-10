@@ -171,6 +171,7 @@ document.querySelectorAll('.mode-btn').forEach((btn) => {
 $('btn-start').onclick = () => { sfx.click(); net.send({ t: 'start' }); };
 $('btn-leave').onclick = () => {
   sfx.click();
+  try { sfx.setAmbience(false); } catch {}
   net.send({ t: 'leave' });
   state.room = null;
   show('title');
@@ -202,7 +203,8 @@ net.onGameStart = (msg) => {
   state.lastHp = -1;
 
   renderer.buildWorld(msg.world);
-  renderer.setPalette(0); // every run starts at golden hour
+  renderer.setPalette(0); // every run opens on the steel-rain grade
+  try { sfx.setAmbience(true); } catch {}
   show('game');
   updateRoleBanner();
   $('wave-pill').classList.toggle('hidden', !isBrawlLike(msg.mode));
@@ -242,7 +244,7 @@ function updateRoleBanner() {
     'THE RIGHT ARM': '#d1495b', 'THE HEAD': '#9b5de5', 'ARMS & HEAD': '#c78bd6',
     'THE WHOLE MECH': '#f5b13d',
   };
-  $('role-banner').style.background = colors[title] || '#f5b13d';
+  $('role-banner').style.setProperty('--rc', colors[title] || '#f5b13d');
   $('laser-wrap').classList.toggle('hidden', !state.myRoles.includes(ROLE.HEAD));
 }
 
@@ -303,12 +305,12 @@ function handleEvents(snap) {
       switch (ev.what) {
         case 'step': if (isMine) { sfx.thud(1); renderer.shake(0.14); } else sfx.thud(0.5); break;
         case 'punchWindup': sfx.whoosh(); break;
-        case 'punchHit': sfx.clang(1.1); renderer.shake(0.4); hitstop(80); renderer.burst(mech.p, '#f5d76e', 12); break;
+        case 'punchHit': sfx.clang(1.1); renderer.shake(0.4); hitstop(80); renderer.burst(mech.p, '#f5d76e', 8); renderer.sparks(mech.p, 14); break;
         case 'punchMiss': break;
         case 'kickWindup': sfx.whoosh(); break;
         case 'kickHit':
           sfx.clang(1.7); renderer.shake(0.75); hitstop(110);
-          renderer.burst(mech.p, '#f5d76e', 20); renderer.ring(mech.p, '#ffd9a0', 12, 0.5);
+          renderer.burst(mech.p, '#f5d76e', 12); renderer.sparks(mech.p, 20, '#ffe2a8', 24); renderer.ring(mech.p, '#ffd9a0', 12, 0.5);
           toast('BOOT!');
           break;
         case 'kickMiss': if (isMine) toast('WHIFF'); break;
@@ -316,7 +318,7 @@ function handleEvents(snap) {
         case 'laserFire': sfx.laserFire(2.4); renderer.shake(0.55); break;
         case 'laserFizzle': if (isMine) { sfx.fizzle(); toast('FIZZLE…'); } break;
         case 'rocketFire': sfx.rocket(); break;
-        case 'rocketHit': sfx.clang(1.3); renderer.shake(0.35); hitstop(70); if (ev.p) renderer.ring(ev.p, '#f5d76e', 8, 0.4); break;
+        case 'rocketHit': sfx.clang(1.3); renderer.shake(0.35); hitstop(70); if (ev.p) { renderer.ring(ev.p, '#f5d76e', 8, 0.4); renderer.sparks(ev.p, 12); } break;
         case 'hurt': if (isMine && (ev.dmg || 0) >= 3) { sfx.hurt(); renderer.shake(Math.min(0.9, 0.2 + (ev.dmg || 5) * 0.03)); } break;
         case 'fell': sfx.crash(1.5); renderer.shake(1.1); toast(pick(['TIMBER!', 'CLANG!', 'MECH DOWN!'])); renderer.dust(mech.p, 22); renderer.ring(mech.p, '#cbb9a0', 16, 0.7); break;
         case 'getUp': if (isMine) toast('BACK UP!'); break;
@@ -373,7 +375,7 @@ function handleEvents(snap) {
       case 'cratesToppled': sfx.clang(1.2); toast('TIMBERRR!'); break;
       case 'trainingDone': sfx.fanfare(); break;
       case 'splat': sfx.splat(dv(ev.p, 40)); if (ev.p) renderer.burst(ev.p, '#9dff5c', 10, 8); if (ev.hit) renderer.shake(0.4); break;
-      case 'carHit': sfx.clang(0.7 * dv(ev.p, 35)); if (ev.p) renderer.burst(ev.p, '#8ad6e6', 8, 12); break;
+      case 'carHit': sfx.clang(0.7 * dv(ev.p, 35)); if (ev.p) { renderer.burst(ev.p, '#8ad6e6', 5, 12); renderer.sparks(ev.p, 8, '#bfe2ff', 14); } break;
       case 'bldgHit': if (ev.p) {
         renderer.dust(ev.p, 7);
         for (let i = 0; i < 3; i++) {
@@ -395,6 +397,7 @@ function updateHud(snap) {
     const frac = Math.max(0, mine.hp / mine.maxHp);
     $('hp-fill').style.width = (frac * 100) + '%';
     $('hp-fill').classList.toggle('low', frac < 0.3);
+    renderer.setHurt?.(frac < 0.35 ? (0.35 - frac) / 0.35 : 0);
   }
 
   if (isBrawlLike()) {
@@ -508,7 +511,7 @@ function renderShopItems(snap) {
     btn.onpointerdown = (e) => { e.preventDefault(); sfx.click(); net.send({ t: 'buy', item: item.id }); };
     wrap.appendChild(btn);
   }
-  $('shop-title').textContent = state.mode === MODES.CLASSIC ? '🛠 WAVE CLEARED — UPGRADE BAY' : '⚙ ENDLESS UPGRADES';
+  $('shop-title').textContent = state.mode === MODES.CLASSIC ? 'WAVE CLEARED — UPGRADE BAY' : 'ENDLESS UPGRADES';
   $('shop-sub').textContent = state.mode === MODES.CLASSIC ? 'Safe shop: spend shared credits, then the host clicks READY for the next wave.' : 'Endless shop: buy upgrades anywhere. The fight keeps moving behind this screen.';
   $('btn-shop-done').classList.toggle('hidden', !(state.mode === MODES.CLASSIC && state.isHost) && state.mode !== MODES.BRAWL);
   $('btn-shop-done').textContent = state.mode === MODES.CLASSIC ? 'READY FOR NEXT WAVE →' : 'BACK TO FIGHT';
@@ -543,6 +546,7 @@ $('btn-upgrades').onclick = openShop;
 // ---------------------------------------------------------------- end
 function showEnd(snap) {
   const s = snap.summary || {};
+  try { sfx.setAmbience(false); } catch {}
   input.end();
   $('click-catch').classList.add('hidden');
   show('end');
