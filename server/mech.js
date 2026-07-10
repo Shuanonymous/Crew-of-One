@@ -332,6 +332,7 @@ export class Mech {
             }
           }
           this.events.push({ what: 'podHit', p: [rnd(ms.p.x), rnd(ms.p.y), rnd(ms.p.z)] });
+          this.onWorldHit?.(ms.p, 'rocket');
         }
         ms.t = 99;
       }
@@ -381,6 +382,10 @@ export class Mech {
       this.events.push({ what: 'punchMiss', side });
       if (this.upgrades.rocket) this.launchRocket(side, yaw);
     }
+    // the fist also meets the world (buildings crumble under it)
+    const reach = aimDir(yaw, 0).scale(P.range * 0.7);
+    this.onWorldHit?.(new CANNON.Vec3(
+      this.body.position.x + reach.x, this.body.position.y + 1.5, this.body.position.z + reach.z), 'punch');
   }
 
   launchRocket(side, yaw) {
@@ -410,6 +415,7 @@ export class Mech {
           this.stats.byPart.ARMS = (this.stats.byPart.ARMS || 0) + (dealt ?? 26);
           this.events.push({ what: 'rocketHit', p: [rnd(r.p.x), rnd(r.p.y), rnd(r.p.z)] });
           this.events.push({ what: 'dmgNum', p: [rnd(r.p.x), rnd(r.p.y + 2), rnd(r.p.z)], dmg: Math.round(dealt ?? 26) });
+          this.onWorldHit?.(r.p, 'rocket');
           r.t = 99;
           break;
         }
@@ -437,6 +443,10 @@ export class Mech {
           this.kickSwung = true; // game modes use this to shake off swarmlings
           const hit = this.sweepHit(targets, this.facingYaw, K.range, K.arc, K.damage * (1 + 0.2 * this.upgrades.dmg), K.knockback, 'LEGS');
           this.events.push({ what: hit ? 'kickHit' : 'kickMiss' });
+          // a mech-scale kick takes chunks out of whatever it lands beside
+          const kr = aimDir(this.facingYaw, 0).scale(K.range * 0.7);
+          this.onWorldHit?.(new CANNON.Vec3(
+            this.body.position.x + kr.x, this.body.position.y - 1, this.body.position.z + kr.z), 'kick');
           // kicking shoves the kicker backward a little too (physics comedy)
           const back = aimDir(this.facingYaw, 0).scale(-260);
           this.body.applyImpulse(new CANNON.Vec3(back.x, 60, back.z));
@@ -479,6 +489,8 @@ export class Mech {
       lz.from = [rnd(cast.from.x), rnd(cast.from.y), rnd(cast.from.z)];
       lz.to = lz.aim;
       lz.hitting = !!cast.target;
+      // the beam carves whatever structure it lands on
+      this.onWorldHit?.(cast.end, 'laser', dmg);
       if (lz.fireT >= L.fireTime) { lz.firing = false; lz.charge = 0; lz.from = lz.to = null; }
       return;
     }

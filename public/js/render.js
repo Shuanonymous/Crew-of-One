@@ -4,6 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { MECH } from '/shared/constants.js';
 
 // Everything visual. Style goals: stylized-cinematic — chunky low-poly
@@ -154,6 +155,15 @@ export class Renderer {
     this.particles = [];
     this.effects = [];             // shockwave rings, scorch marks
     this.windowTex = makeWindowTexture();
+    // repeat in world units (see worldUVBox) instead of stretching one
+    // texture sheet across an entire facade — the old way magnified the
+    // texels into giant blurry "pixels"
+    this.windowTex.wrapS = this.windowTex.wrapT = THREE.RepeatWrapping;
+    this.windowTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    // matching relief: recessed window glass, proud floor slabs
+    this.facadeNormal = makeFacadeNormal();
+    this.facadeNormal.wrapS = this.facadeNormal.wrapT = THREE.RepeatWrapping;
+    this.facadeNormal.anisotropy = this.windowTex.anisotropy;
 
     // palette state (lerped on wave changes)
     this.palA = PALETTES[0]; this.palB = PALETTES[0]; this.palT = 1;
@@ -173,7 +183,11 @@ export class Renderer {
       this.scene.environment = pmrem.fromScene(envScene).texture;
     } catch (e) { /* PMREM unsupported: metal falls back to lit-only */ }
 
-    this.composer = new EffectComposer(this.renderer);
+    // multisampled render target: without MSAA samples the whole post
+    // chain renders jagged edges (the single biggest "pixelated" offender)
+    const rtSize = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    const rt = new THREE.WebGLRenderTarget(rtSize.x, rtSize.y, { samples: 4, type: THREE.HalfFloatType });
+    this.composer = new EffectComposer(this.renderer, rt);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.9, 0.6, 0.6);
     this.composer.addPass(this.bloom);
@@ -185,8 +199,10 @@ export class Renderer {
 
   setQuality(q) {
     const opts = {
-      low: { pr: 0.75, shadows: false, bloom: 0, fog: 190, embers: 0 },
-      medium: { pr: 1, shadows: true, bloom: 0.55, fog: 320, embers: 40 },
+      low: { pr: 0.8, shadows: false, bloom: 0, fog: 190, embers: 0 },
+      // render at native device resolution — 1x on a retina display reads
+      // as a blurry, pixelated upscale
+      medium: { pr: Math.min(window.devicePixelRatio, 1.75), shadows: true, bloom: 0.55, fog: 320, embers: 40 },
       high: { pr: Math.min(window.devicePixelRatio, 2), shadows: true, bloom: 0.7, fog: 420, embers: 70 },
     }[q] || {};
     if (!opts.pr) return;
@@ -195,6 +211,7 @@ export class Renderer {
     this.sun.castShadow = opts.shadows;
     if (this.bloom) this.bloom.strength = opts.bloom;
     this.scene.fog.far = opts.fog;
+    this.fogBase = opts.fog; // keep the gust-breathing anchored to the new range
     this.emberPts.visible = opts.embers > 0;
     this.rainPts.material.size = opts.pr < 1 ? 0.7 : 0.5;
     this.resize();
@@ -265,10 +282,15 @@ export class Renderer {
       this.applyPalette(this.currentPalette());
     }
     const t = performance.now() / 1000;
-    // rain falls around the camera (single buffer update)
+    // WIND: slow gust cycles drive the rain sideways and make the storm
+    // breathe instead of falling in a static sheet
+    const gust = Math.sin(t * 0.13) * 0.6 + Math.sin(t * 0.047 + 2) * 0.4; // -1..1
+    const windX = gust * 22;
+    // rain falls around the camera (single buffer update), angled by wind
     const rp = this.rainPos;
     for (let i = 0; i < rp.length; i += 3) {
-      rp[i + 1] -= dt * 46;
+      rp[i] += windX * dt;
+      rp[i + 1] -= dt * (42 + Math.abs(gust) * 18);
       if (rp[i + 1] < 0) {
         rp[i] = this.camPos.x + (Math.random() - 0.5) * 150;
         rp[i + 1] = 55 + Math.random() * 10;
@@ -276,16 +298,26 @@ export class Renderer {
       }
     }
     this.rainPts.geometry.attributes.position.needsUpdate = true;
+    this.rainPts.material.opacity = 0.4 + Math.abs(gust) * 0.25;
+    // fog breathes with the gusts — the district closes in and opens up
+    if (this.scene.fog && this.fogBase == null) this.fogBase = this.scene.fog.far;
+    if (this.scene.fog && this.fogBase) this.scene.fog.far = this.fogBase * (1 - Math.abs(gust) * 0.12);
     // searchlights sweep slowly
     for (const s of this.searchlights) {
       s.cone.rotation.z = Math.sin(t * 0.21 + s.ph) * 0.5;
       s.cone.rotation.x = Math.PI + Math.cos(t * 0.17 + s.ph) * 0.35;
     }
-    // horizon lightning: a sudden hemi flash, then decay
+    // horizon lightning: a sudden hemi flash, then decay — with thunder
+    // arriving a beat later (distance sells the scale of the storm)
     this.lightningT -= dt;
     if (this.lightningT <= 0) {
       this.lightningT = 6 + Math.random() * 14;
       this.flash = 1;
+      this.thunderT = 0.4 + Math.random() * 1.4;
+    }
+    if (this.thunderT != null) {
+      this.thunderT -= dt;
+      if (this.thunderT <= 0) { this.thunderT = null; this.thunderReady = true; }
     }
     if (this.flash > 0) {
       this.flash = Math.max(0, this.flash - dt * 3.5);
@@ -350,10 +382,52 @@ export class Renderer {
     if (scorches.length > 26) { const old = scorches[0]; old.t = old.dur; }
   }
 
+  // ballistic concrete chunk: tumbles out of a collapse, bounces once,
+  // settles into the rubble and fades
+  debrisChunk(p, v, size = 1) {
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(size, size * (0.6 + Math.random() * 0.7), size * (0.5 + Math.random())),
+      new THREE.MeshStandardMaterial({ color: '#4a4854', roughness: 0.95, metalness: 0.06, flatShading: true, transparent: true })
+    );
+    m.position.set(p[0], p[1], p[2]);
+    m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    m.castShadow = true;
+    this.scene.add(m);
+    this.effects.push({
+      m, t: 0, dur: 2.6, kind: 'chunk',
+      v: new V3(v[0], v[1], v[2]),
+      rv: { x: (Math.random() - 0.5) * 9, z: (Math.random() - 0.5) * 9 },
+      half: size * 0.4, grounded: false,
+    });
+    const chunks = this.effects.filter((e) => e.kind === 'chunk');
+    if (chunks.length > 40) chunks[0].t = chunks[0].dur;
+  }
+
   stepEffects(dt) {
     for (const e of this.effects) {
       e.t += dt;
       const k = e.t / e.dur;
+      if (e.kind === 'chunk') {
+        if (!e.grounded) {
+          e.v.y -= 42 * dt;
+          e.m.position.addScaledVector(e.v, dt);
+          e.m.rotation.x += e.rv.x * dt;
+          e.m.rotation.z += e.rv.z * dt;
+          if (e.m.position.y <= e.half) {
+            e.m.position.y = e.half;
+            if (Math.abs(e.v.y) > 9) {
+              e.v.y = Math.abs(e.v.y) * 0.35;         // one hard bounce
+              e.v.x *= 0.5; e.v.z *= 0.5;
+              e.rv.x *= 0.5; e.rv.z *= 0.5;
+            } else {
+              e.grounded = true;                       // settle in the rubble
+            }
+          }
+        }
+        e.m.material.opacity = k < 0.75 ? 1 : 1 - (k - 0.75) / 0.25;
+        if (e.t >= e.dur) this.scene.remove(e.m);
+        continue;
+      }
       if (e.kind === 'ring') {
         const s = 1 + (e.maxR - 1) * easeOut(Math.min(1, k));
         e.m.scale.set(s, s, 1);
@@ -428,15 +502,37 @@ export class Renderer {
   buildWorld(world) {
     this.clearWorld();
     const g = this.worldGroup;
-    this.batches = { body: {}, roof: {} }; // color -> geometry list
+    // destructible buildings: defs are kept so the batched city meshes can
+    // be rebuilt (minus the fallen) whenever the server fells one
+    this.bldgDefs = [];
+    this.bldgDown = new Set();
+    this.bldgDeco = new Map();
+    this.bldgBatchMeshes = [];
+    this.bldgMats = new Map();
 
     for (const d of world.city) {
       if (d.kind === 'ground') {
-        // rain-slicked asphalt: dark, semi-metallic, low roughness so it
-        // mirrors the neon sky/city through the env map (cinematic wet look)
+        // rain-slicked asphalt with real surface detail: a procedural
+        // asphalt map plus a roughness map full of puddle patches, so the
+        // street is broken mirror where it's wet and grainy where it's dry
+        if (!this.asphaltTex) {
+          this.asphaltTex = makeAsphaltTexture();
+          this.asphaltRough = makeAsphaltRoughness();
+          this.asphaltNorm = makeAsphaltNormal();
+          for (const t of [this.asphaltTex, this.asphaltRough, this.asphaltNorm]) {
+            t.wrapS = t.wrapT = THREE.RepeatWrapping;
+            t.repeat.set(26, 26);
+          }
+          this.asphaltTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+        }
         const mesh = new THREE.Mesh(
           new THREE.BoxGeometry(...d.size),
-          new THREE.MeshStandardMaterial({ color: '#0e1220', metalness: 0.85, roughness: 0.28, envMapIntensity: 1.2 })
+          new THREE.MeshStandardMaterial({
+            color: '#5a6478', map: this.asphaltTex,
+            metalness: 0.72, roughness: 1.0, roughnessMap: this.asphaltRough,
+            normalMap: this.asphaltNorm, normalScale: new THREE.Vector2(0.7, 0.7),
+            envMapIntensity: 1.25,
+          })
         );
         mesh.position.set(...d.p);
         mesh.receiveShadow = true;
@@ -459,39 +555,44 @@ export class Renderer {
         mesh.position.set(d.p[0], d.p[1], d.p[2]);
         g.add(mesh);
       } else if (d.kind === 'landmark') {
-        const mesh = new THREE.Mesh(new THREE.BoxGeometry(...d.size),
-          new THREE.MeshLambertMaterial({ color: d.color, map: this.windowTex }));
-        mesh.position.set(...d.p);
-        mesh.castShadow = true;
-        g.add(mesh);
-        const cap = new THREE.Mesh(new THREE.SphereGeometry(2.2, 8, 6),
+        // tiered corporate tower: setbacks, a crown, an antenna mast
+        const [lw, lh, ld] = d.size;
+        const mat = new THREE.MeshLambertMaterial({ color: d.color, map: this.windowTex });
+        const trim = new THREE.MeshStandardMaterial({ color: '#39415c', metalness: 0.7, roughness: 0.4 });
+        const baseY = d.p[1] - lh / 2;
+        const tiers = [[1.0, 0.58], [0.78, 0.26], [0.55, 0.13]];
+        let ty = baseY;
+        for (const [scale, frac] of tiers) {
+          const th = lh * frac;
+          const tier = new THREE.Mesh(
+            worldUVBox(new THREE.BoxGeometry(lw * scale, th, ld * scale), lw * scale, th, ld * scale), mat);
+          tier.position.set(d.p[0], ty + th / 2, d.p[2]);
+          tier.castShadow = true;
+          g.add(tier);
+          const ledge = new THREE.Mesh(new THREE.BoxGeometry(lw * scale + 0.8, 0.7, ld * scale + 0.8), trim);
+          ledge.position.set(d.p[0], ty + th, d.p[2]);
+          g.add(ledge);
+          ty += th;
+        }
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.4, lh * 0.14, 8), trim);
+        mast.position.set(d.p[0], ty + lh * 0.07, d.p[2]);
+        g.add(mast);
+        const cap = new THREE.Mesh(new THREE.SphereGeometry(1.1, 8, 6),
           new THREE.MeshBasicMaterial({ color: '#ff4d5e' }));
-        cap.position.set(d.p[0], d.p[1] + d.size[1] / 2 + 2, d.p[2]);
+        cap.position.set(d.p[0], ty + lh * 0.14 + 1, d.p[2]);
         g.add(cap);
       } else if (d.kind === 'building') {
-        // batch: one merged mesh per color = a handful of draw calls total
-        const box = new THREE.BoxGeometry(...d.size);
-        if (d.yaw) box.rotateY(d.yaw);
-        box.translate(...d.p);
-        (this.batches.body[d.color] = this.batches.body[d.color] || []).push(box);
-        const roof = new THREE.BoxGeometry(d.size[0] + 0.7, 0.8, d.size[2] + 0.7);
-        if (d.yaw) roof.rotateY(d.yaw);
-        roof.translate(d.p[0], d.p[1] + d.size[1] / 2 + 0.4, d.p[2]);
-        (this.batches.roof[d.color] = this.batches.roof[d.color] || []).push(roof);
+        this.bldgDefs.push(d);
         this.decorateBuilding(g, d);
+      } else if (d.kind === 'lamp') {
+        (this._lampDefs = this._lampDefs || []).push(d);
+      } else if (d.kind === 'billboard') {
+        this.addBillboard(g, d);
       }
     }
-    for (const [color, geos] of Object.entries(this.batches.body)) {
-      const mesh = new THREE.Mesh(mergeGeometries(geos),
-        new THREE.MeshLambertMaterial({ color, map: this.windowTex }));
-      mesh.castShadow = mesh.receiveShadow = true;
-      g.add(mesh);
-    }
-    for (const [color, geos] of Object.entries(this.batches.roof)) {
-      const mesh = new THREE.Mesh(mergeGeometries(geos),
-        new THREE.MeshLambertMaterial({ color: shade(color, 0.72) }));
-      g.add(mesh);
-    }
+    // batch: one merged mesh per color = a handful of draw calls total
+    this.rebuildBuildingBatches();
+    this.buildStreetFurniture(g);
 
     // ---- war damage: a kaiju has been through here. Broken rooflines,
     // rubble mounds, exposed rebar, scattered debris. All merged into a
@@ -519,37 +620,96 @@ export class Renderer {
     }
     this.tankViews = [];
     for (const t of world.tanks || []) {
-      const m = new THREE.Mesh(new THREE.CylinderGeometry(2, 2.2, 4.5, 10),
-        new THREE.MeshLambertMaterial({ color: '#b8622e' }));
-      m.position.set(t.p[0], 2.2, t.p[2]);
-      m.castShadow = true;
-      g.add(m);
-      this.tankViews.push(m);
+      // industrial fuel tank: ribbed pressure vessel with hazard band
+      const grp = new THREE.Group();
+      const shell = new THREE.MeshStandardMaterial({ color: '#b8622e', metalness: 0.6, roughness: 0.45 });
+      const steel = new THREE.MeshStandardMaterial({ color: '#3a3f4d', metalness: 0.8, roughness: 0.35 });
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 3.8, 12), shell);
+      body.position.y = 2.1; body.castShadow = true;
+      grp.add(body);
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(2, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), shell);
+      dome.position.y = 4.0;
+      grp.add(dome);
+      for (const ry of [1.1, 3.1]) {
+        const rib = new THREE.Mesh(new THREE.CylinderGeometry(2.12, 2.12, 0.22, 12), steel);
+        rib.position.y = ry;
+        grp.add(rib);
+      }
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(2.06, 2.06, 0.5, 12),
+        new THREE.MeshStandardMaterial({ color: '#1a1206', emissive: new THREE.Color('#ff8a1e'), emissiveIntensity: 1.1, roughness: 0.5 }));
+      band.position.y = 2.1;
+      grp.add(band);
+      const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 2.4, 8), steel);
+      pipe.position.set(1.4, 4.6, 0); pipe.rotation.z = 0.5;
+      grp.add(pipe);
+      const valve = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.1, 6, 12), steel);
+      valve.position.set(0, 4.9, 0); valve.rotation.x = Math.PI / 2;
+      grp.add(valve);
+      grp.position.set(t.p[0], 0, t.p[2]);
+      g.add(grp);
+      this.tankViews.push(grp);
     }
     this.stationViews = [];
     for (const s of world.stations || []) {
+      // field repair bay: deck plate, perimeter pylons with emissive tips,
+      // and a slowly-spinning holo cross overhead
       const grp = new THREE.Group();
-      const pad = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 0.5, 20),
-        new THREE.MeshLambertMaterial({ color: '#1d3a4a' }));
+      const steel = new THREE.MeshStandardMaterial({ color: '#24404f', metalness: 0.7, roughness: 0.4 });
+      const pad = new THREE.Mesh(new THREE.CylinderGeometry(9, 9.6, 0.5, 20), steel);
       pad.position.y = 0.25;
+      grp.add(pad);
       const glow = new THREE.Mesh(new THREE.RingGeometry(7.5, 8.6, 30),
         new THREE.MeshBasicMaterial({ color: '#5cff8f', transparent: true, opacity: 0.5, side: THREE.DoubleSide }));
       glow.rotation.x = -Math.PI / 2;
       glow.position.y = 0.6;
-      grp.add(pad, glow);
+      grp.add(glow);
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + 0.4;
+        const py = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, 4.2, 8), steel);
+        py.position.set(Math.cos(a) * 8.2, 2.1, Math.sin(a) * 8.2);
+        grp.add(py);
+        const tip = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 6),
+          new THREE.MeshBasicMaterial({ color: '#5cff8f' }));
+        tip.position.set(Math.cos(a) * 8.2, 4.4, Math.sin(a) * 8.2);
+        grp.add(tip);
+      }
+      // holo cross (two additive bars; spins in applySample via userData)
+      const holo = new THREE.Group();
+      const hm = new THREE.MeshBasicMaterial({ color: '#5cff8f', transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
+      holo.add(new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.0, 0.3), hm));
+      holo.add(new THREE.Mesh(new THREE.BoxGeometry(1.0, 3.2, 0.3), hm));
+      holo.position.y = 7;
+      grp.add(holo);
+      grp.userData.holo = holo;
       grp.position.set(s.p[0], 0, s.p[2]);
       g.add(grp);
       this.stationViews.push(grp);
     }
     this.cacheViews = [];
     for (const c of world.caches || []) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3),
-        new THREE.MeshLambertMaterial({ color: '#8f7a2e' }));
-      m.position.set(c.p[0], 1.5, c.p[2]);
-      m.rotation.y = 0.5;
-      m.castShadow = true;
-      g.add(m);
-      this.cacheViews.push(m);
+      // armored supply crate: frame edges, glowing seam, stenciled lid
+      const grp = new THREE.Group();
+      const body = new THREE.Mesh(new RoundedBoxGeometry(3, 3, 3, 2, 0.22),
+        new THREE.MeshStandardMaterial({ color: '#8f7a2e', metalness: 0.55, roughness: 0.5 }));
+      body.castShadow = true;
+      grp.add(body);
+      const frame = new THREE.MeshStandardMaterial({ color: '#3d3524', metalness: 0.7, roughness: 0.4 });
+      for (const [rx, rz] of [[0, 0], [Math.PI / 2, 0], [0, Math.PI / 2]]) {
+        const edge = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.4, 0.4), frame);
+        edge.rotation.set(rx, 0, rz);
+        grp.add(edge);
+      }
+      const seam = new THREE.Mesh(new THREE.BoxGeometry(3.06, 0.18, 3.06),
+        new THREE.MeshBasicMaterial({ color: '#ffd166' }));
+      seam.position.y = 0.6;
+      grp.add(seam);
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.25, 2.2), frame);
+      lid.position.y = 1.55;
+      grp.add(lid);
+      grp.position.set(c.p[0], 1.5, c.p[2]);
+      grp.rotation.y = 0.5;
+      g.add(grp);
+      this.cacheViews.push(grp);
     }
     this.pickupMeshes = new Map();
 
@@ -593,21 +753,43 @@ export class Renderer {
       }
     }
 
-    // dynamic props from the server (puntable cars)
+    // dynamic props from the server (puntable cars) — real little cars now:
+    // metallic paint, glass cabin, four wheels, head/tail lights
     this.propMeshes.clear();
     for (const d of world.props || []) {
       const car = new THREE.Group();
+      const [w, h, dp] = d.size;
       const body = new THREE.Mesh(
-        new THREE.BoxGeometry(d.size[0], d.size[1] * 0.6, d.size[2]),
-        new THREE.MeshLambertMaterial({ color: d.color })
+        new RoundedBoxGeometry(w, h * 0.55, dp, 3, 0.18),
+        new THREE.MeshStandardMaterial({ color: d.color, metalness: 0.75, roughness: 0.3, envMapIntensity: 1.2 })
       );
+      body.position.y = 0.1;
       body.castShadow = true;
+      car.add(body);
       const cabin = new THREE.Mesh(
-        new THREE.BoxGeometry(d.size[0] * 0.55, d.size[1] * 0.5, d.size[2] * 0.85),
-        new THREE.MeshLambertMaterial({ color: '#1d2033' })
+        new RoundedBoxGeometry(w * 0.5, h * 0.45, dp * 0.82, 2, 0.14),
+        new THREE.MeshStandardMaterial({ color: '#0e1a26', metalness: 0.4, roughness: 0.12, envMapIntensity: 1.5 })
       );
-      cabin.position.y = d.size[1] * 0.5;
-      car.add(body, cabin);
+      cabin.position.set(-w * 0.06, h * 0.42, 0);
+      car.add(cabin);
+      const wheelG = new THREE.CylinderGeometry(h * 0.28, h * 0.28, 0.24, 10);
+      const wheelM = new THREE.MeshStandardMaterial({ color: '#15161c', metalness: 0.3, roughness: 0.8 });
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        const wh = new THREE.Mesh(wheelG, wheelM);
+        wh.rotation.x = Math.PI / 2;
+        wh.position.set(sx * w * 0.32, -h * 0.18, sz * (dp / 2 - 0.02));
+        car.add(wh);
+      }
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 0.4),
+        new THREE.MeshBasicMaterial({ color: '#ffeebb' }));
+      head.position.set(w / 2 - 0.02, 0.12, 0);
+      head.scale.z = dp * 1.4;
+      car.add(head);
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.36),
+        new THREE.MeshBasicMaterial({ color: '#ff4444' }));
+      tail.position.set(-w / 2 + 0.02, 0.12, 0);
+      tail.scale.z = dp * 1.4;
+      car.add(tail);
       g.add(car);
       this.propMeshes.set(d.id, car);
     }
@@ -631,8 +813,11 @@ export class Renderer {
       const rng = mulberry32(h);
       const [w, bh, dp] = d.size;
       const topY = d.p[1] + bh / 2;
-      // ~55% of buildings are visibly wrecked
+      // ~55% of buildings are visibly wrecked. Anything attached to the
+      // structure itself (roof teeth, facade scars, roof rebar) merges into
+      // that building's deco group so it falls WITH the building.
       if (h % 100 < 55) {
+        const attached = [];
         // broken, jagged roofline: uneven concrete teeth around the top edge
         const teeth = 3 + (h % 4);
         for (let i = 0; i < teeth; i++) {
@@ -640,13 +825,20 @@ export class Renderer {
           const th = 1.5 + rng() * (bh * 0.14);
           const ex = (rng() - 0.5) * (w - tw);
           const ez = (rng() - 0.5) * (dp - tw);
-          pushBox(concrete, tw, th, tw, d.p[0] + ex, topY + th / 2 - 0.4, d.p[2] + ez, 0, rng() * 0.6, (rng() - 0.5) * 0.25);
-          if (rng() < 0.5) pushBox(rebarGeos, 0.08, th * 1.5, 0.08, d.p[0] + ex, topY + th * 0.9, d.p[2] + ez, (rng() - 0.5) * 0.4, 0, (rng() - 0.5) * 0.4);
+          pushBox(attached, tw, th, tw, d.p[0] + ex, topY + th / 2 - 0.4, d.p[2] + ez, 0, rng() * 0.6, (rng() - 0.5) * 0.25);
+          if (rng() < 0.5) pushBox(attached, 0.08, th * 1.5, 0.08, d.p[0] + ex, topY + th * 0.9, d.p[2] + ez, (rng() - 0.5) * 0.4, 0, (rng() - 0.5) * 0.4);
         }
         // gouged blast scar partway up the facade (a dark recessed chunk)
         if (h % 3 === 0 && bh > 16) {
           const sy = d.p[1] + (rng() - 0.3) * bh * 0.4;
-          pushBox(concrete, w * 0.3, bh * 0.16, 1.2, d.p[0] + (rng() - 0.5) * w * 0.4, sy, d.p[2] + dp / 2, 0, 0, (rng() - 0.5) * 0.3);
+          pushBox(attached, w * 0.3, bh * 0.16, 1.2, d.p[0] + (rng() - 0.5) * w * 0.4, sy, d.p[2] + dp / 2, 0, 0, (rng() - 0.5) * 0.3);
+        }
+        if (attached.length) {
+          const m = new THREE.Mesh(mergeGeometries(attached),
+            new THREE.MeshStandardMaterial({ color: '#4a4854', metalness: 0.1, roughness: 0.95, flatShading: true }));
+          m.castShadow = true;
+          const deco = this.bldgDeco?.get(d.id);
+          (deco || g).add(m);
         }
       }
       // rubble mound at the base for most buildings
@@ -692,8 +884,178 @@ export class Renderer {
     }
   }
 
-  // client-side rooftop garnish: water towers, AC units, antennas, neon
-  decorateBuilding(g, d) {
+  // Street furniture: sodium streetlights along the avenues (merged into
+  // 2 draw calls) and sidewalk plinths under every building (1 draw call).
+  buildStreetFurniture(g) {
+    const lamps = this._lampDefs || [];
+    this._lampDefs = null;
+    if (lamps.length) {
+      const poles = [], heads = [];
+      for (const d of lamps) {
+        const pole = new THREE.CylinderGeometry(0.14, 0.22, 9, 8);
+        pole.translate(d.p[0], 4.5, d.p[2]);
+        poles.push(pole);
+        const arm = new THREE.CylinderGeometry(0.1, 0.1, 2.6, 6);
+        arm.rotateZ(Math.PI / 2);
+        arm.translate(d.p[0] + 1.1, 8.9, d.p[2]);
+        poles.push(arm);
+        const head = new THREE.BoxGeometry(1.0, 0.3, 0.5);
+        head.translate(d.p[0] + 2.2, 8.85, d.p[2]);
+        heads.push(head);
+      }
+      const poleMesh = new THREE.Mesh(mergeGeometries(poles),
+        new THREE.MeshStandardMaterial({ color: '#252a36', metalness: 0.8, roughness: 0.45 }));
+      poleMesh.castShadow = true;
+      g.add(poleMesh);
+      const headMesh = new THREE.Mesh(mergeGeometries(heads),
+        new THREE.MeshBasicMaterial({ color: '#ffca7a' })); // sodium glow — bloom does the halo
+      g.add(headMesh);
+    }
+    // sidewalk plinths: a pale concrete apron around every building
+    // footprint. Static (sidewalks survive the building falling on them).
+    const slabs = [];
+    for (const d of this.bldgDefs) {
+      const [w, , dd] = d.size;
+      const s = new THREE.BoxGeometry(w + 3, 0.28, dd + 3);
+      if (d.yaw) s.rotateY(d.yaw);
+      s.translate(d.p[0], 0.14, d.p[2]);
+      slabs.push(s);
+    }
+    if (slabs.length) {
+      const m = new THREE.Mesh(mergeGeometries(slabs),
+        new THREE.MeshStandardMaterial({ color: '#565b66', metalness: 0.15, roughness: 0.9 }));
+      m.receiveShadow = true;
+      g.add(m);
+    }
+  }
+
+  // Neon ad board bolted to a facade; lives in the building's deco group
+  // so it comes down with the structure.
+  addBillboard(g, d) {
+    if (!this._adTex) {
+      this._adTex = [0, 1, 2].map((v) => makeAdTexture(v));
+    }
+    const grp = new THREE.Group();
+    const [bw, bh] = d.size;
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(bw + 0.5, bh + 0.5, 0.25),
+      new THREE.MeshStandardMaterial({ color: '#1c202c', metalness: 0.7, roughness: 0.5 }));
+    grp.add(frame);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(bw, bh),
+      new THREE.MeshBasicMaterial({ map: this._adTex[d.v % 3] }));
+    face.position.z = 0.16;
+    grp.add(face);
+    grp.position.set(...d.p);
+    if (d.yaw) grp.rotation.y = d.yaw;
+    const deco = d.bldg != null && this.bldgDeco ? this.bldgDeco.get(d.bldg) : null;
+    (deco || g).add(grp);
+  }
+
+  // Re-merge the standing buildings into a few draw calls. Called at world
+  // build and again whenever the server fells one (rare, so the merge cost
+  // is invisible).
+  rebuildBuildingBatches() {
+    const g = this.worldGroup;
+    for (const m of this.bldgBatchMeshes) { g.remove(m); m.geometry.dispose(); }
+    this.bldgBatchMeshes = [];
+    const body = {}, roof = {};
+    for (const d of this.bldgDefs) {
+      if (this.bldgDown.has(d.id)) continue;
+      const box = worldUVBox(new THREE.BoxGeometry(...d.size), ...d.size);
+      if (d.yaw) box.rotateY(d.yaw);
+      box.translate(...d.p);
+      (body[d.color] = body[d.color] || []).push(box);
+      const rf = new THREE.BoxGeometry(d.size[0] + 0.7, 0.8, d.size[2] + 0.7);
+      if (d.yaw) rf.rotateY(d.yaw);
+      rf.translate(d.p[0], d.p[1] + d.size[1] / 2 + 0.4, d.p[2]);
+      (roof[d.color] = roof[d.color] || []).push(rf);
+    }
+    const matFor = (key, make) => {
+      if (!this.bldgMats.has(key)) this.bldgMats.set(key, make());
+      return this.bldgMats.get(key);
+    };
+    for (const [color, geos] of Object.entries(body)) {
+      const mesh = new THREE.Mesh(mergeGeometries(geos),
+        matFor('b' + color, () => new THREE.MeshLambertMaterial({
+          color, map: this.windowTex,
+          normalMap: this.facadeNormal, normalScale: new THREE.Vector2(0.85, 0.85),
+        })));
+      mesh.castShadow = mesh.receiveShadow = true;
+      g.add(mesh);
+      this.bldgBatchMeshes.push(mesh);
+    }
+    for (const [color, geos] of Object.entries(roof)) {
+      const mesh = new THREE.Mesh(mergeGeometries(geos),
+        matFor('r' + color, () => new THREE.MeshLambertMaterial({ color: shade(color, 0.72) })));
+      g.add(mesh);
+      this.bldgBatchMeshes.push(mesh);
+    }
+  }
+
+  // A building falls: pull it from the skyline, drop a rubble mound in its
+  // footprint, and (when it happens on-screen, not from a catch-up
+  // snapshot) throw dust, smoke and a shockwave.
+  collapseBuilding(id, vfx = true) {
+    if (!this.bldgDown || this.bldgDown.has(id)) return;
+    const d = this.bldgDefs.find((x) => x.id === id);
+    if (!d) return;
+    this.bldgDown.add(id);
+    this.rebuildBuildingBatches();
+    const deco = this.bldgDeco.get(id);
+    if (deco) this.worldGroup.remove(deco);
+
+    const [w, h, dd] = d.size;
+    const rng = mulberry32(hashStr('fall' + id));
+    const chunks = [];
+    const slab = (cw, ch, cd, x, y, z, ry, rz) => {
+      const b = new THREE.BoxGeometry(cw, ch, cd);
+      b.rotateY(ry); b.rotateZ(rz);
+      b.translate(x, y, z);
+      chunks.push(b);
+    };
+    // central heap + slumped slabs leaning outward
+    slab(w * 0.6, 1.6 + h * 0.08, dd * 0.6, d.p[0], (1.6 + h * 0.08) / 2, d.p[2], rng() * 1, 0);
+    const n = 5 + (hashStr(id) % 4);
+    for (let i = 0; i < n; i++) {
+      const cw = 1.5 + rng() * w * 0.4;
+      const ch = 0.8 + rng() * 2.2;
+      slab(cw, ch, cw * (0.5 + rng() * 0.8),
+        d.p[0] + (rng() - 0.5) * w * 0.9, ch / 2, d.p[2] + (rng() - 0.5) * dd * 0.9,
+        rng() * Math.PI, (rng() - 0.5) * 0.5);
+    }
+    const rubble = new THREE.Mesh(mergeGeometries(chunks),
+      new THREE.MeshStandardMaterial({ color: '#46434f', roughness: 0.95, metalness: 0.06, flatShading: true }));
+    rubble.castShadow = rubble.receiveShadow = true;
+    this.worldGroup.add(rubble);
+
+    if (vfx) {
+      const p = [d.p[0], 1, d.p[2]];
+      this.dust([d.p[0], 7, d.p[2]], 30);
+      this.ring(p, '#8b8496', Math.max(w, dd) * 1.4, 0.9);
+      for (let i = 0; i < 7; i++) {
+        this.smoke([d.p[0] + (Math.random() - 0.5) * w, 2 + Math.random() * h * 0.35,
+          d.p[2] + (Math.random() - 0.5) * dd]);
+      }
+      // ballistic chunks blown out of the falling structure
+      const nCh = Math.min(12, 6 + Math.round(h / 8));
+      for (let i = 0; i < nCh; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const sp = 6 + Math.random() * 14;
+        this.debrisChunk(
+          [d.p[0] + (Math.random() - 0.5) * w * 0.7, 2 + Math.random() * h * 0.6, d.p[2] + (Math.random() - 0.5) * dd * 0.7],
+          [Math.cos(a) * sp, 4 + Math.random() * 10, Math.sin(a) * sp],
+          0.7 + Math.random() * 1.3);
+      }
+      this.shake(0.65);
+    }
+  }
+
+  // client-side rooftop garnish: water towers, AC units, antennas, neon.
+  // Everything goes into a per-building group so it vanishes when the
+  // building comes down.
+  decorateBuilding(parent, d) {
+    const g = new THREE.Group();
+    parent.add(g);
+    if (d.id != null && this.bldgDeco) this.bldgDeco.set(d.id, g);
     const h = hashStr(d.p[0] + ',' + d.p[2]);
     const topY = d.p[1] + d.size[1] / 2;
     if (h % 5 === 0) {
@@ -858,8 +1220,16 @@ export class Renderer {
     if (b.inter) {
       b.inter.tanks?.forEach((alive, i) => { if (this.tankViews[i]) this.tankViews[i].visible = alive; });
       b.inter.caches?.forEach((alive, i) => { if (this.cacheViews[i]) this.cacheViews[i].visible = alive; });
-      b.inter.stations?.forEach((st, i) => { if (this.stationViews[i]) this.stationViews[i].visible = st.alive; });
+      b.inter.stations?.forEach((st, i) => {
+        const v = this.stationViews[i];
+        if (!v) return;
+        v.visible = st.alive;
+        if (v.userData.holo) { v.userData.holo.rotation.y += dt * 1.2; v.userData.holo.position.y = 7 + Math.sin(performance.now() / 600) * 0.4; }
+      });
     }
+    // downed buildings: snapshot state is the source of truth (idempotent;
+    // the bldgDown event supplies the collapse VFX when it happens live)
+    if (b.bldg) for (const id of b.bldg) this.collapseBuilding(id, false);
     if (b.crates && this.crateMeshes.length) {
       b.crates.forEach((c, i) => {
         const mesh = this.crateMeshes[i];
@@ -996,11 +1366,13 @@ class MechView {
       m.castShadow = true; m.receiveShadow = true;
       parent.add(m); return m;
     };
-    const bevel = (w, h, d) => new THREE.BoxGeometry(w, h, d); // (kept simple for perf)
+    // every armor plate gets softened, machined edges — hard box corners
+    // are what reads as "blocky" once the light rakes across them
+    const bevel = (w, h, d) => new RoundedBoxGeometry(w, h, d, 2, Math.min(w, h, d) * 0.14);
 
     // ================= TORSO =================
     // tapered core (wider shoulders, narrow waist) built from stacked plates
-    P(this.root, new THREE.CylinderGeometry(2.5, 1.9, 3.4, 8), main, 0, 0.9, 0);   // upper chest drum
+    P(this.root, new THREE.CylinderGeometry(2.5, 1.9, 3.4, 16), main, 0, 0.9, 0);   // upper chest drum
     P(this.root, bevel(3.0, 1.6, 2.2), plate, 0, 1.6, -0.2);                        // chest plate
     P(this.root, bevel(1.8, 1.9, 1.8), dark, 0, -1.8, 0);                           // waist block
     P(this.root, bevel(2.6, 0.5, 2.2), plate, 0, -0.9, 0);                          // belt
@@ -1056,17 +1428,17 @@ class MechView {
       const hip = new THREE.Group();
       hip.position.set(side * 1.2, -2.6, 0);
       this.root.add(hip);
-      P(hip, new THREE.SphereGeometry(0.7, 10, 8), dark, 0, 0, 0);                 // hip ball
-      P(hip, new THREE.CylinderGeometry(0.9, 0.75, 2.4, 6), main, 0, -1.3, 0);     // thigh armor
+      P(hip, new THREE.SphereGeometry(0.7, 16, 12), dark, 0, 0, 0);                 // hip ball
+      P(hip, new THREE.CylinderGeometry(0.9, 0.75, 2.4, 14), main, 0, -1.3, 0);     // thigh armor
       P(hip, bevel(0.5, 1.8, 0.5), plate, side * 0.7, -1.3, 0.1);                  // thigh side plate
       P(hip, new THREE.CylinderGeometry(0.12, 0.12, 2.0, 6), piston, side * 0.35, -1.3, 0.55); // hydraulic rod
 
       const shinG = new THREE.Group();
       shinG.position.y = -2.6;
       hip.add(shinG);
-      P(shinG, new THREE.SphereGeometry(0.5, 8, 8), piston, 0, 0.1, 0);            // knee actuator
+      P(shinG, new THREE.SphereGeometry(0.5, 14, 10), piston, 0, 0.1, 0);            // knee actuator
       P(shinG, bevel(0.3, 0.9, 0.3), piston, 0, 0.55, 0.4);                        // knee piston
-      P(shinG, new THREE.CylinderGeometry(0.7, 0.55, 2.2, 6), main, 0, -1.1, 0);   // shin
+      P(shinG, new THREE.CylinderGeometry(0.7, 0.55, 2.2, 14), main, 0, -1.1, 0);   // shin
       P(shinG, bevel(1.0, 1.4, 0.4), plate, 0, -1.0, -0.55);                       // shin guard
       // splayed foot with toe plates + heel
       P(shinG, bevel(1.5, 0.5, 2.4), dark, 0, -2.3, -0.2);                         // foot base
@@ -1088,14 +1460,14 @@ class MechView {
       const s = side === 'L' ? -1 : 1;
       // upper arm: armored cylinder with a concentric cable sleeve
       const upper = new THREE.Group();
-      P(upper, new THREE.CylinderGeometry(0.5, 0.44, 1, 10), main, 0, 0, 0);
+      P(upper, new THREE.CapsuleGeometry(0.46, 0.55, 4, 14), main, 0, 0, 0);
       P(upper, new THREE.CylinderGeometry(0.6, 0.58, 0.28, 10), plate, 0, 0.34, 0); // shoulder cuff (stays tubular)
       // forearm: chromed piston ram + a darker outer housing at the elbow end
       const fore = new THREE.Group();
       P(fore, new THREE.CylinderGeometry(0.36, 0.34, 1, 10), piston, 0, 0, 0);      // bright ram core
       P(fore, new THREE.CylinderGeometry(0.52, 0.4, 0.5, 10), main, 0, 0.28, 0);    // forearm housing (elbow side)
       P(fore, new THREE.CylinderGeometry(0.4, 0.46, 0.22, 10), dark, 0, -0.42, 0);  // wrist collar (fist side)
-      const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.6, 12, 10), piston);
+      const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 12), piston);
       // fist: knuckle block + finger plates + emissive energy core
       const fist = new THREE.Group();
       P(fist, bevel(1.5, 1.3, 1.5), plate, 0, 0, 0);
@@ -1356,7 +1728,7 @@ class CrabView {
     this.flashMats = [shell, belly, dark];
 
     // domed rocky carapace (flat-shaded low-poly = chitinous, not a box)
-    const carapace = new THREE.Mesh(new THREE.IcosahedronGeometry(3.3, 1),
+    const carapace = new THREE.Mesh(new THREE.IcosahedronGeometry(3.3, 2),
       new THREE.MeshLambertMaterial({ color: style.shell, flatShading: true }));
     carapace.scale.set(1.05, 0.62, 0.92);
     carapace.position.y = 0.5;
@@ -1412,7 +1784,7 @@ class CrabView {
       this.root.add(armG);
       const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.85, 8, 6), dark);
       armG.add(shoulder);
-      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.85, 2.6, 7), dark);
+      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.62, 1.7, 4, 12), dark);
       arm.rotation.x = Math.PI / 2; arm.position.z = -1.2;
       armG.add(arm);
       // knuckle
@@ -1435,10 +1807,10 @@ class CrabView {
       for (let i = 0; i < 3; i++) {
         const legG = new THREE.Group();
         legG.position.set(s * 2.6, -0.4, -1.4 + i * 1.4);
-        const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.3, 2.0, 6), dark);
+        const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 1.5, 4, 10), dark);
         thigh.rotation.z = s * 1.0; thigh.position.set(s * 0.8, -0.3, 0);
         legG.add(thigh);
-        const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.12, 2.4, 6), dark);
+        const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.19, 2.0, 4, 10), dark);
         shin.position.set(s * 1.7, -1.4, 0); shin.rotation.z = s * 0.25;
         legG.add(shin);
         const foot = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.7, 5), shell);
@@ -1540,18 +1912,18 @@ class SpitterView {
     this.scene = scene;
     this.root = new THREE.Group();
     scene.add(this.root);
-    const skin = new THREE.MeshLambertMaterial({ color: '#5f7a2e', flatShading: true });
-    const belly = new THREE.MeshLambertMaterial({ color: '#b6c96a', flatShading: true });
+    const skin = new THREE.MeshStandardMaterial({ color: '#5f7a2e', roughness: 0.35, metalness: 0.05 }); // wet amphibian sheen
+    const belly = new THREE.MeshStandardMaterial({ color: '#b6c96a', roughness: 0.3, metalness: 0.05 });
     const dark = new THREE.MeshLambertMaterial({ color: '#38501c' });
     this.flashMats = [skin, belly, dark];
 
     // warty low-poly bulk
-    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(2.5, 1), skin);
+    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(2.5, 3), skin);
     body.scale.set(1.2, 0.82, 1.05);
     body.castShadow = true;
     this.root.add(body);
     // a distended acid-sac throat that inflates before it spits
-    this.throat = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 1), belly);
+    this.throat = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 3), belly);
     this.throat.position.set(0, -0.5, -1.7);
     this.root.add(this.throat);
     // gaping maw (wide cone) it fires through
@@ -1577,7 +1949,7 @@ class SpitterView {
       eye.add(pupil);
       this.root.add(eye);
       // splayed webbed legs (thigh + foot)
-      const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 1.5, 6), dark);
+      const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.42, 0.9, 4, 10), dark);
       thigh.position.set(s * 2.1, -1.3, 0.4); thigh.rotation.z = s * 0.6;
       this.root.add(thigh);
       const foot = new THREE.Mesh(new THREE.ConeGeometry(0.7, 0.5, 4), skin);
@@ -1630,12 +2002,12 @@ class FlyerView {
     const dark = new THREE.MeshLambertMaterial({ color: '#241a14' });
     this.flashMats = [hide, membrane, dark];
 
-    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 1), hide);
+    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 2), hide);
     body.scale.set(0.85, 0.8, 1.7);
     body.castShadow = true;
     this.root.add(body);
     // neck sweeping forward to a horned head
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.75, 1.9, 7), hide);
+    const neck = new THREE.Mesh(new THREE.CapsuleGeometry(0.6, 1.1, 4, 10), hide);
     neck.position.set(0, 0.55, -1.7); neck.rotation.x = 1.15;
     this.root.add(neck);
     const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.72, 0), hide);
@@ -1733,24 +2105,43 @@ class SwarmView {
     this.scene = scene;
     this.root = new THREE.Group();
     scene.add(this.root);
-    const skin = new THREE.MeshLambertMaterial({ color: '#c86bd6' });
-    this.flashMats = [skin];
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.75, 8, 6), skin);
+    // dozens on screen at once, so it stays cheap — but it reads as a
+    // spined parasite now, not a bouncing ball
+    const skin = new THREE.MeshLambertMaterial({ color: '#a44fb5', flatShading: true });
+    const dark = new THREE.MeshLambertMaterial({ color: '#5c2468', flatShading: true });
+    this.flashMats = [skin, dark];
+    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.75, 0), skin);
+    body.scale.set(1, 0.9, 1.15);
     body.castShadow = true;
     this.root.add(body);
+    // dorsal spines
+    for (let i = 0; i < 3; i++) {
+      const sp = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.55, 4), dark);
+      sp.position.set(0, 0.6 - i * 0.12, -0.25 + i * 0.35);
+      sp.rotation.x = -0.4 + i * 0.35;
+      this.root.add(sp);
+    }
+    // single furious cyclops eye
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6),
-      new THREE.MeshBasicMaterial({ color: '#ff2e3f' }));
-    eye.position.set(0, 0.25, -0.55);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.15, 6, 6),
+      new THREE.MeshBasicMaterial({ color: '#ffcf3f' }));
+    eye.position.set(0, 0.22, -0.6);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.14, 6, 6),
       new THREE.MeshLambertMaterial({ color: '#1d2033' }));
-    pupil.position.z = -0.2;
+    pupil.position.z = -0.22;
     eye.add(pupil);
     this.root.add(eye);
+    // needle-teeth underbite
+    for (const s of [-1, 0, 1]) {
+      const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.28, 4), dark);
+      tooth.position.set(s * 0.22, -0.32, -0.62);
+      tooth.rotation.x = 0.5;
+      this.root.add(tooth);
+    }
     this.legs = [];
     for (const s of [-1, 1]) {
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.2),
-        new THREE.MeshLambertMaterial({ color: '#7a3a85' }));
-      leg.position.set(s * 0.4, -0.75, 0);
+      const leg = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.75, 4), dark);
+      leg.position.set(s * 0.42, -0.7, 0);
+      leg.rotation.x = Math.PI; // point down
       this.root.add(leg);
       this.legs.push(leg);
     }
@@ -1790,35 +2181,44 @@ class PigeonView {
     this.root = new THREE.Group();
     scene.add(this.root);
 
-    const grey = new THREE.MeshLambertMaterial({ color: '#9aa3b2' });
-    const lite = new THREE.MeshLambertMaterial({ color: '#c6ccd6' });
-    const green = new THREE.MeshLambertMaterial({ color: '#4d8f6b' });
-    this.flashMats = [grey, lite, green];
+    const grey = new THREE.MeshLambertMaterial({ color: '#9aa3b2', flatShading: true });
+    const lite = new THREE.MeshLambertMaterial({ color: '#c6ccd6', flatShading: true });
+    // iridescent neck sheen — the one truly premium feature of any pigeon
+    const green = new THREE.MeshStandardMaterial({ color: '#3d7a5a', metalness: 0.8, roughness: 0.25, emissive: new THREE.Color('#1a4d38'), emissiveIntensity: 0.4 });
+    this.flashMats = [grey, lite];
     this.flashT = 0;
 
-    const body = new THREE.Mesh(new THREE.SphereGeometry(2.9, 10, 8), grey);
+    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(2.9, 3), grey);
     body.scale.set(1, 0.95, 1.25);
     body.castShadow = true;
     body.position.y = 0.4;
     this.root.add(body);
-    const chest = new THREE.Mesh(new THREE.SphereGeometry(2.1, 10, 8), lite);
+    const chest = new THREE.Mesh(new THREE.IcosahedronGeometry(2.1, 3), lite);
     chest.position.set(0, -0.2, -1.4);
     this.root.add(chest);
 
-    // tail
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.5, 2.6), grey);
-    tail.position.set(0, 0.8, 3.4);
-    tail.rotation.x = 0.35;
-    this.root.add(tail);
+    // fanned tail: overlapping feather slats
+    for (let i = -2; i <= 2; i++) {
+      const feather = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.18, 2.8), i % 2 ? grey : lite);
+      feather.position.set(i * 0.62, 0.8 + Math.abs(i) * 0.08, 3.4 + Math.abs(i) * -0.25);
+      feather.rotation.x = 0.35;
+      feather.rotation.y = i * 0.16;
+      this.root.add(feather);
+    }
 
-    // wings
+    // wings: layered primary feathers on a shoulder pivot
     this.wings = [];
     for (const s of [-1, 1]) {
-      const wing = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.8, 3.6), grey);
-      wing.geometry.translate(0, -0.9, 0);
+      const wing = new THREE.Group();
+      for (let f = 0; f < 4; f++) {
+        const fe = new THREE.Mesh(new THREE.BoxGeometry(0.32, 1.7 - f * 0.18, 3.4 - f * 0.5), f % 2 ? grey : lite);
+        fe.position.set(s * f * 0.3, -0.85, 0.2 + f * 0.28);
+        fe.rotation.y = s * f * 0.09;
+        fe.castShadow = f === 0;
+        wing.add(fe);
+      }
       wing.position.set(s * 2.7, 1.6, 0.4);
       wing.rotation.z = s * 0.5;
-      wing.castShadow = true;
       this.root.add(wing);
       this.wings.push({ mesh: wing, s });
     }
@@ -1982,20 +2382,224 @@ function makeSkyTexture() {
 }
 
 function makeWindowTexture() {
+  // facade sheet tiled in world units (one tile = 12m x 24m, ~8 floors):
+  // concrete mottling, floor slabs, and varied windows — warm lit, cool
+  // TV-glow, dim, dark glass — at a resolution that stays crisp up close
   const cv = document.createElement('canvas');
-  cv.width = 64; cv.height = 128;
+  cv.width = 256; cv.height = 512;
   const ctx = cv.getContext('2d');
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, 64, 128);
-  for (let y = 8; y < 120; y += 14) {
-    for (let x = 6; x < 58; x += 12) {
-      ctx.fillStyle = Math.random() < 0.22 ? '#ffe9b0' : 'rgba(30,34,60,0.55)';
-      ctx.fillRect(x, y, 7, 9);
+  ctx.fillStyle = '#dcdad6';
+  ctx.fillRect(0, 0, 256, 512);
+  // concrete mottling + weather streaks
+  for (let i = 0; i < 500; i++) {
+    ctx.fillStyle = `rgba(${90 + Math.random() * 60},${90 + Math.random() * 60},${100 + Math.random() * 60},0.06)`;
+    ctx.fillRect(Math.random() * 256, Math.random() * 512, 4 + Math.random() * 14, 4 + Math.random() * 14);
+  }
+  for (let i = 0; i < 22; i++) {
+    const x = Math.random() * 256;
+    ctx.fillStyle = 'rgba(50,54,70,0.08)';
+    ctx.fillRect(x, Math.random() * 200, 2 + Math.random() * 4, 120 + Math.random() * 260);
+  }
+  // floor slabs (8 floors per tile → 3m floors at 24m tile height)
+  for (let y = 0; y < 512; y += 64) {
+    ctx.fillStyle = 'rgba(40,44,66,0.4)';
+    ctx.fillRect(0, y, 256, 6);
+  }
+  // window grid with mullions and varied lighting
+  for (let y = 14; y < 500; y += 64) {
+    for (let x = 10; x < 240; x += 32) {
+      const r = Math.random();
+      if (r < 0.13) ctx.fillStyle = '#ffe9b0';                       // warm lit
+      else if (r < 0.19) ctx.fillStyle = '#9fd4ff';                  // cool tv glow
+      else if (r < 0.26) ctx.fillStyle = 'rgba(255,233,176,0.32)';   // dim
+      else ctx.fillStyle = 'rgba(20,24,44,0.72)';                    // dark glass
+      ctx.fillRect(x, y + 8, 22, 38);
+      // mullions
+      ctx.fillStyle = 'rgba(30,34,56,0.55)';
+      ctx.fillRect(x + 10, y + 8, 2.5, 38);
+      ctx.fillRect(x, y + 26, 22, 2.5);
+      // sill highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      ctx.fillRect(x, y + 46, 22, 2);
     }
   }
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
+}
+
+// Convert a grayscale height canvas into a tangent-space normal map
+// (Sobel gradients), so flat geometry shows real relief under raking light.
+function normalFromHeight(cv, strength = 2.0) {
+  const w = cv.width, h = cv.height;
+  const src = cv.getContext('2d').getImageData(0, 0, w, h).data;
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const octx = out.getContext('2d');
+  const img = octx.createImageData(w, h);
+  const hgt = (x, y) => src[(((y + h) % h) * w + ((x + w) % w)) * 4] / 255;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = (hgt(x - 1, y) - hgt(x + 1, y)) * strength;
+      const dy = (hgt(x, y - 1) - hgt(x, y + 1)) * strength;
+      const inv = 1 / Math.hypot(dx, dy, 1);
+      const i = (y * w + x) * 4;
+      img.data[i] = (dx * inv * 0.5 + 0.5) * 255;
+      img.data[i + 1] = (dy * inv * 0.5 + 0.5) * 255;
+      img.data[i + 2] = (inv * 0.5 + 0.5) * 255;
+      img.data[i + 3] = 255;
+    }
+  }
+  octx.putImageData(img, 0, 0);
+  return new THREE.CanvasTexture(out);
+}
+
+// facade height field: windows punched in, floor slabs standing proud —
+// must match makeWindowTexture's grid (256x512, 64px floors, 32px bays)
+function makeFacadeNormal() {
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = 256;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#808080';
+  ctx.fillRect(0, 0, 128, 256);
+  for (let y = 0; y < 256; y += 32) {
+    ctx.fillStyle = '#9c9c9c';
+    ctx.fillRect(0, y, 128, 3);
+  }
+  for (let y = 7; y < 250; y += 32) {
+    for (let x = 5; x < 120; x += 16) {
+      ctx.fillStyle = '#525252'; // recessed glass
+      ctx.fillRect(x, y + 4, 11, 19);
+    }
+  }
+  return normalFromHeight(cv, 2.4);
+}
+
+// street height field: grain plus recessed cracks
+function makeAsphaltNormal() {
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = 128;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#828282';
+  ctx.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 1600; i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? '#8e8e8e' : '#747474';
+    ctx.fillRect(Math.random() * 128, Math.random() * 128, 1.6, 1.6);
+  }
+  ctx.strokeStyle = '#4a4a4a';
+  ctx.lineWidth = 1.2;
+  for (let c = 0; c < 5; c++) {
+    let x = Math.random() * 128, y = Math.random() * 128;
+    ctx.beginPath(); ctx.moveTo(x, y);
+    for (let s = 0; s < 7; s++) { x += (Math.random() - 0.5) * 26; y += (Math.random() - 0.5) * 26; ctx.lineTo(x, y); }
+    ctx.stroke();
+  }
+  return normalFromHeight(cv, 1.6);
+}
+
+function makeAdTexture(variant) {
+  // neon signage: glyph blocks and bars in a signature hue on near-black,
+  // bright enough for the bloom pass to halo it
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = 128;
+  const ctx = cv.getContext('2d');
+  const hue = ['#ff5da2', '#4dfff0', '#ffe14d'][variant % 3];
+  const dim = ['#7a2450', '#1d7a72', '#7a6a1d'][variant % 3];
+  ctx.fillStyle = '#07080e';
+  ctx.fillRect(0, 0, 256, 128);
+  // border tube
+  ctx.strokeStyle = hue; ctx.lineWidth = 5;
+  ctx.strokeRect(8, 8, 240, 112);
+  // glyph blocks (fake lettering — reads as signage at game distance)
+  let x = 26;
+  const seed = mulberry32(9000 + variant);
+  for (let i = 0; i < 7 && x < 210; i++) {
+    const gw = 14 + seed() * 18;
+    ctx.fillStyle = seed() < 0.75 ? hue : dim;
+    if (seed() < 0.5) ctx.fillRect(x, 30, gw, 42);
+    else { ctx.fillRect(x, 30, gw, 12); ctx.fillRect(x, 58, gw, 14); }
+    x += gw + 10;
+  }
+  // underline bar
+  ctx.fillStyle = dim;
+  ctx.fillRect(26, 88, 160 + seed() * 40, 10);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Rescale a BoxGeometry's UVs so a texture tiles in WORLD units (one tile
+// = tileW x tileH meters) instead of stretching once per face. Box face
+// order: +x, -x, +y, -y, +z, -z (4 verts each).
+function worldUVBox(geo, w, h, d, tileW = 12, tileH = 24) {
+  const uv = geo.attributes.uv;
+  for (let i = 0; i < uv.count; i++) {
+    const face = Math.floor(i / 4);
+    let su = 1, sv = 1;
+    if (face === 0 || face === 1) { su = d / tileW; sv = h / tileH; }        // ±x sides
+    else if (face === 2 || face === 3) { su = w / tileW; sv = d / tileW; }   // roof/floor
+    else { su = w / tileW; sv = h / tileH; }                                 // ±z faces
+    uv.setXY(i, uv.getX(i) * su, uv.getY(i) * sv);
+  }
+  uv.needsUpdate = true;
+  return geo;
+}
+
+function makeAsphaltTexture() {
+  // dark asphalt: speckle grain, larger tonal mottles, hairline cracks
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = 256;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#181c28';
+  ctx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 480; i++) {
+    ctx.fillStyle = `rgba(${120 + Math.random() * 70},${125 + Math.random() * 70},${140 + Math.random() * 70},0.05)`;
+    const s = 4 + Math.random() * 22;
+    ctx.fillRect(Math.random() * 256, Math.random() * 256, s, s * (0.4 + Math.random()));
+  }
+  for (let i = 0; i < 2600; i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.09)';
+    ctx.fillRect(Math.random() * 256, Math.random() * 256, 1.4, 1.4);
+  }
+  // hairline cracks: random dark walks
+  ctx.strokeStyle = 'rgba(6,8,14,0.55)';
+  ctx.lineWidth = 1.1;
+  for (let c = 0; c < 7; c++) {
+    let x = Math.random() * 256, y = Math.random() * 256;
+    ctx.beginPath(); ctx.moveTo(x, y);
+    for (let s = 0; s < 9; s++) {
+      x += (Math.random() - 0.5) * 42; y += (Math.random() - 0.5) * 42;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function makeAsphaltRoughness() {
+  // grayscale roughness: bright = dry grain, dark blobs = mirror puddles
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = 128;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#9a9a9a';
+  ctx.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 900; i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
+    ctx.fillRect(Math.random() * 128, Math.random() * 128, 2, 2);
+  }
+  for (let p = 0; p < 9; p++) {
+    const px = Math.random() * 128, py = Math.random() * 128;
+    for (let b = 0; b < 6; b++) {
+      ctx.fillStyle = 'rgba(28,28,28,0.5)';
+      ctx.beginPath();
+      ctx.ellipse(px + (Math.random() - 0.5) * 16, py + (Math.random() - 0.5) * 16,
+        4 + Math.random() * 9, 3 + Math.random() * 6, Math.random() * 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  return new THREE.CanvasTexture(cv);
 }
 
 function placeSegment(mesh, a, b, radiusScale = 1) {

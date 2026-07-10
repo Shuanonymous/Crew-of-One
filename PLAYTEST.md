@@ -48,6 +48,10 @@ Lobby → **ENDLESS ESCALATION** → START.
 - Use the world: punch/laser an orange **fuel tank** near a crowd for a
   big AoE; stand in a green **repair station** to heal (monsters wreck
   them); smash **credit caches**.
+- **Wreck the city**: buildings are destructible. Punch or kick a small
+  one a couple of times, rocket a tower, or hold the laser on a facade —
+  it crumbles into a rubble mound with dust and a shockwave. Bosses and
+  armored tanks bulldoze straight through blocks to reach you.
 - Named bosses arrive at danger milestones with a health bar. When the
   mech dies, the **run summary** shows time survived, the map seed, and
   per-pilot damage. Beat the room's best time.

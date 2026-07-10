@@ -24,6 +24,16 @@ function quietGame() { // endless game with the spawner muzzled
   g.graceT = 1e9;
   return g;
 }
+// determinism guard for ranged-weapon tests: the city seed is random, and
+// a fuel tank / credit cache that happens to sit between the mech and its
+// target eats tracers and homing rockets (they detonate on ANY target in
+// the path). Clear the random interactables so those tests measure
+// weapons, not seed luck.
+function clearRange(g) {
+  g.inter.tanks.length = 0;
+  g.inter.caches.length = 0;
+  return g;
+}
 
 // ------------------------------------------------------------ ENDLESS CORE
 {
@@ -186,6 +196,10 @@ function quietGame() { // endless game with the spawner muzzled
 // ------------------------------------------------------- KICK & VARIETY
 {
   const g = quietGame();
+  // bad seeds can drop a building over the crab's placement point; the
+  // static box then ejects the crab sideways out of the kick arc. Level
+  // the area first — with the destruction system itself.
+  g.damageBuildingsAt({ x: 0, y: 2, z: -5 }, 14, 1e9);
   const kicked = new Monster(g.world, 'crab', { x: 0, z: -7 }, 1);
   kicked.setState('recover'); kicked.t = -1e9;
   g.monsters.push(kicked);
@@ -279,6 +293,7 @@ function quietGame() { // endless game with the spawner muzzled
 // ---------------------------------------------------------- RANGED WEAPONS
 {
   const g = quietGame();
+  clearRange(g);
   g.mech.upgrades.cannon = true;
   const m = new Monster(g.world, 'crab', { x: 0, z: -20 }, 1);
   m.setState('recover'); m.t = -1e9;
@@ -295,6 +310,7 @@ function quietGame() { // endless game with the spawner muzzled
 }
 {
   const g = quietGame();
+  clearRange(g);
   g.mech.upgrades.pods = true;
   const m = new Monster(g.world, 'crab', { x: 0, z: -25 }, 1);
   m.setState('recover'); m.t = -1e9;
@@ -309,6 +325,59 @@ function quietGame() { // endless game with the spawner muzzled
   }
   check('rocket pods home in and damage a target', m.hp < hp0, `hp ${hp0} -> ${m.hp}`);
   check('rocket ammo depletes then regenerates', g.mech.podAmmo < 6 || g.mech.podRegen >= 0);
+}
+
+// ------------------------------------------------- DESTRUCTIBLE BUILDINGS
+{
+  const g = quietGame();
+  check('city has destructible buildings with hp', g.buildings.length > 10 && g.buildings.every((b) => b.hp > 0),
+    `n=${g.buildings.length}`);
+
+  // direct demolition: enough damage collapses the building, removes its
+  // physics body, records it in the snapshot, and emits an event
+  const b = g.buildings[0];
+  const bodiesBefore = g.world.bodies.length;
+  g.damageBuildingsAt({ x: b.def.p[0], y: 2, z: b.def.p[2] }, 2, 999999);
+  check('building collapses at 0 hp', !b.alive);
+  // note: city gen can overlap footprints, so one blast may fell neighbors too
+  check('collapsed building bodies leave the physics world',
+    g.world.bodies.length === bodiesBefore - g.downedBuildings.length && g.downedBuildings.length >= 1,
+    `${bodiesBefore} -> ${g.world.bodies.length} (downed=${g.downedBuildings.length})`);
+  check('collapse emits bldgDown event', g.events.some((e) => e.what === 'bldgDown' && e.id === b.id));
+  check('snapshot carries downed building ids', g.snapshot().bldg.includes(b.id));
+
+  // partial damage: chips hp, emits a hit event, building stands
+  const b2 = g.buildings.find((x) => x.alive);
+  g.damageBuildingsAt({ x: b2.def.p[0], y: 2, z: b2.def.p[2] }, 2, 10);
+  check('partial damage chips hp but building stands', b2.alive && b2.hp === b2.maxHp - 10,
+    `hp ${b2.hp}/${b2.maxHp}`);
+
+  // punches wired through onWorldHit: park the mech just south of a live
+  // building, aim north (yaw 0 = -z), and resolve a punch
+  const b3 = g.buildings.find((x) => x.alive && x !== b2);
+  const bd3 = b3.def.size[2];
+  g.mech.body.position.set(b3.def.p[0], 5, b3.def.p[2] + bd3 / 2 + 4);
+  g.mech.input.armYawL = 0;
+  const hpP0 = b3.hp;
+  g.mech.resolvePunch('L', g.mechTargets);
+  check('a punch chips the building in front of the fist', b3.hp < hpP0 || !b3.alive,
+    `hp ${hpP0} -> ${b3.alive ? b3.hp : 'DOWN'}`);
+
+  // boss kaiju bulldoze buildings by walking through them: hold the boss
+  // pressed against a wall (spawning it inside would just eject it) and
+  // let the 4 Hz contact check grind the structure down
+  const g2 = quietGame();
+  const b4 = g2.buildings.find((x) => x.alive);
+  const boss = new Monster(g2.world, 'boss', { x: b4.def.p[0], z: b4.def.p[2] + b4.def.size[2] / 2 + 3 }, 3);
+  boss.setState('recover'); boss.t = -1e9;
+  g2.monsters.push(boss);
+  for (let i = 0; i < 60 * 2 && b4.alive; i++) {
+    boss.body.position.set(b4.def.p[0], 3, b4.def.p[2] + b4.def.size[2] / 2 + 1);
+    boss.body.velocity.setZero();
+    g2.step();
+  }
+  check('boss kaiju bulldozes buildings by contact', !b4.alive || b4.hp < b4.maxHp,
+    `hp ${b4.hp}/${b4.maxHp}`);
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);

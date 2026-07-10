@@ -25,6 +25,7 @@ export function buildCity(world, seed = 'TRAIN') {
   const rng = mulberry32(seedToInt(seed));
   const defs = [];
   const interactables = { beacons: [], tanks: [], stations: [], caches: [] };
+  const buildings = []; // destructible: { id, body, def, hp, maxHp, alive }
 
   // ground
   const ground = new CANNON.Body({
@@ -65,11 +66,37 @@ export function buildCity(world, seed = 'TRAIN') {
           position: new CANNON.Vec3(x, h / 2, z),
         });
         world.addBody(body);
-        defs.push({
-          kind: 'building', size: [w, h, d], p: [x, h / 2, z], yaw: 0,
+        const def = {
+          kind: 'building', id: 'b' + buildings.length, size: [w, h, d], p: [x, h / 2, z], yaw: 0,
           color: PALETTE[colorI++ % PALETTE.length], windows: true,
-        });
+        };
+        defs.push(def);
+        // hp scales with bulk: small shops crumble to a punch or two,
+        // big towers take real ordnance
+        buildings.push({ id: def.id, body, def, hp: Math.round(40 + (w * d * h) / 70), maxHp: 0, alive: true });
+        // neon billboard on some taller facades (falls with its building)
+        if (h > 22 && rng() < 0.3) {
+          defs.push({
+            kind: 'billboard', bldg: def.id,
+            p: [x, 6 + rng() * (h - 14), z + d / 2 + 0.35],
+            size: [Math.min(9, w * 0.8), 3.4 + rng() * 2.2],
+            v: Math.floor(rng() * 3),
+          });
+        }
       }
+    }
+  }
+
+  // streetlights along the avenues: two per block, opposite corners
+  for (let i = 0; i < blockCenters.length; i++) {
+    const [cx, cz] = blockCenters[i];
+    const off = BLOCK / 2 + 3;
+    const corners = i % 2 === 0
+      ? [[cx - off, cz - off], [cx + off, cz + off]]
+      : [[cx - off, cz + off], [cx + off, cz - off]];
+    for (const [lx, lz] of corners) {
+      if (Math.abs(lx - riverX) < 15) continue; // not in the river
+      defs.push({ kind: 'lamp', p: [lx, 0, lz] });
     }
   }
 
@@ -108,7 +135,8 @@ export function buildCity(world, seed = 'TRAIN') {
   for (let i = 0; i < 3; i++) { const p = place(30, 140); if (p) interactables.stations.push({ id: 'rs' + i, p: [p[0], 0, p[1]], hp: 80, maxHp: 80, alive: true }); }
   for (let i = 0; i < 8; i++) { const p = place(20, 160); if (p) interactables.caches.push({ id: 'cc' + i, p: [p[0], 1.5, p[1]], hp: 20, alive: true, credits: 15 + Math.floor(rng() * 16) }); }
 
-  return { defs, interactables, riverX, seed };
+  for (const b of buildings) b.maxHp = b.hp;
+  return { defs, interactables, riverX, seed, buildings };
 }
 
 // Dynamic props: cars the mech (and monsters) can punt.
