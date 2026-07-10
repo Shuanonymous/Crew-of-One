@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { MECH } from '/shared/constants.js';
@@ -95,9 +96,23 @@ export class Renderer {
       }
     }
     this.silhouettes = new THREE.Mesh(mergeGeometries(silGeos),
-      new THREE.MeshBasicMaterial({ color: '#241f42', fog: false }));
+      new THREE.MeshBasicMaterial({ color: '#2a2450', fog: false, map: makeSkylineTexture() }));
     this.silhouettes.frustumCulled = false;
     this.scene.add(this.silhouettes);
+    // aircraft-warning beacons on the tallest distant towers (bloom dots)
+    const beaconGeos = [];
+    const rngB = mulberry32(77);
+    for (let i = 0; i < 14; i++) {
+      const a = rngB() * Math.PI * 2;
+      const r = 205 + rngB() * 120;
+      const bg = new THREE.BoxGeometry(1.6, 1.6, 1.6);
+      bg.translate(Math.cos(a) * r, 40 + rngB() * 70, Math.sin(a) * r);
+      beaconGeos.push(bg);
+    }
+    this.skyBeacons = new THREE.Mesh(mergeGeometries(beaconGeos),
+      new THREE.MeshBasicMaterial({ color: '#ff3b4e', fog: false }));
+    this.skyBeacons.frustumCulled = false;
+    this.scene.add(this.skyBeacons);
 
     // drifting embers / dust motes: one Points cloud
     const emberN = 70;
@@ -191,6 +206,23 @@ export class Renderer {
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.9, 0.6, 0.6);
     this.composer.addPass(this.bloom);
+    // cinematic finish: gentle vignette + animated film grain
+    this.filmPass = new ShaderPass({
+      uniforms: { tDiffuse: { value: null }, uTime: { value: 0 } },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: [
+        'uniform sampler2D tDiffuse; uniform float uTime; varying vec2 vUv;',
+        'void main(){',
+        '  vec4 c = texture2D(tDiffuse, vUv);',
+        '  float d = distance(vUv, vec2(0.5));',
+        '  c.rgb *= 0.82 + 0.18 * smoothstep(0.85, 0.3, d);',
+        '  float g = fract(sin(dot(vUv + mod(uTime, 7.0), vec2(12.9898, 78.233))) * 43758.5453);',
+        '  c.rgb += (g - 0.5) * 0.028;',
+        '  gl_FragColor = c;',
+        '}',
+      ].join('\n'),
+    });
+    this.composer.addPass(this.filmPass);
     this.composer.addPass(new OutputPass());
 
     window.addEventListener('resize', () => this.resize());
@@ -910,6 +942,24 @@ export class Renderer {
       const headMesh = new THREE.Mesh(mergeGeometries(heads),
         new THREE.MeshBasicMaterial({ color: '#ffca7a' })); // sodium glow — bloom does the halo
       g.add(headMesh);
+      // volumetric-ish light cones + warm pools on the wet street
+      const cones = [], pools = [];
+      for (const d of lamps) {
+        const cone = new THREE.ConeGeometry(3.2, 8.6, 12, 1, true);
+        cone.translate(d.p[0] + 2.2, 4.4, d.p[2]);
+        cones.push(cone);
+        const pool = new THREE.CircleGeometry(4.2, 20);
+        pool.rotateX(-Math.PI / 2);
+        pool.translate(d.p[0] + 2.2, 0.34, d.p[2]);
+        pools.push(pool);
+      }
+      const coneMesh = new THREE.Mesh(mergeGeometries(cones),
+        new THREE.MeshBasicMaterial({ color: '#ffca7a', transparent: true, opacity: 0.045, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+      g.add(coneMesh);
+      if (!this._poolTex) this._poolTex = makeRadialGlowTexture();
+      const poolMesh = new THREE.Mesh(mergeGeometries(pools),
+        new THREE.MeshBasicMaterial({ map: this._poolTex, color: '#ffca7a', transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false }));
+      g.add(poolMesh);
     }
     // sidewalk plinths: a pale concrete apron around every building
     // footprint. Static (sidewalks survive the building falling on them).
@@ -963,10 +1013,12 @@ export class Renderer {
       const box = worldUVBox(new THREE.BoxGeometry(...d.size), ...d.size);
       if (d.yaw) box.rotateY(d.yaw);
       box.translate(...d.p);
+      bakeGroundAO(box);
       (body[d.color] = body[d.color] || []).push(box);
       const rf = new THREE.BoxGeometry(d.size[0] + 0.7, 0.8, d.size[2] + 0.7);
       if (d.yaw) rf.rotateY(d.yaw);
       rf.translate(d.p[0], d.p[1] + d.size[1] / 2 + 0.4, d.p[2]);
+      bakeGroundAO(rf);
       (roof[d.color] = roof[d.color] || []).push(rf);
     }
     const matFor = (key, make) => {
@@ -976,7 +1028,7 @@ export class Renderer {
     for (const [color, geos] of Object.entries(body)) {
       const mesh = new THREE.Mesh(mergeGeometries(geos),
         matFor('b' + color, () => new THREE.MeshLambertMaterial({
-          color, map: this.windowTex,
+          color, map: this.windowTex, vertexColors: true,
           normalMap: this.facadeNormal, normalScale: new THREE.Vector2(0.85, 0.85),
         })));
       mesh.castShadow = mesh.receiveShadow = true;
@@ -985,7 +1037,7 @@ export class Renderer {
     }
     for (const [color, geos] of Object.entries(roof)) {
       const mesh = new THREE.Mesh(mergeGeometries(geos),
-        matFor('r' + color, () => new THREE.MeshLambertMaterial({ color: shade(color, 0.72) })));
+        matFor('r' + color, () => new THREE.MeshLambertMaterial({ color: shade(color, 0.72), vertexColors: true })));
       g.add(mesh);
       this.bldgBatchMeshes.push(mesh);
     }
@@ -1317,7 +1369,10 @@ export class Renderer {
     this.monsterViews.get(id)?.flash?.();
   }
 
-  render() { this.composer.render(); }
+  render() {
+    if (this.filmPass) this.filmPass.uniforms.uTime.value = performance.now() / 1000;
+    this.composer.render();
+  }
 }
 
 const VIEW_STYLES = {
@@ -1378,8 +1433,12 @@ class MechView {
     P(this.root, bevel(2.6, 0.5, 2.2), plate, 0, -0.9, 0);                          // belt
     // angled pectoral plates
     for (const s of [-1, 1]) P(this.root, bevel(1.3, 1.5, 0.5), plate, s * 0.85, 1.5, -1.15, 0.2, 0, -s * 0.25);
-    // glowing reactor core in the chest
+    // glowing reactor core in the chest — and it actually casts light,
+    // so the mech throws cyan onto wet streets and passing kaiju
     P(this.root, new THREE.CylinderGeometry(0.55, 0.55, 0.4, 12), trim, 0, 0.9, -1.35, Math.PI / 2, 0, 0);
+    this.reactorLight = new THREE.PointLight('#3fd6ff', 16, 26, 2);
+    this.reactorLight.position.set(0, 1.0, -1.8);
+    this.root.add(this.reactorLight);
     // back thruster pods
     for (const s of [-1, 1]) {
       P(this.root, new THREE.CylinderGeometry(0.5, 0.62, 2.2, 8), dark, s * 1.1, 1.2, 1.4);
@@ -1540,6 +1599,16 @@ class MechView {
       this.prevPos.copy(this.root.position);
     }
 
+    // weight: the hull leans into its stride and bobs with the step cycle
+    if (!mb.ragdoll && !mb.dead) {
+      const fwd = new V3(0, 0, -1).applyQuaternion(this.root.quaternion);
+      const right = new V3(1, 0, 0).applyQuaternion(this.root.quaternion);
+      this._leanF = damp(this._leanF || 0, -clampN(this.velocity.dot(fwd) * 0.011, 0.085), 6, dt);
+      this._leanS = damp(this._leanS || 0, -clampN(this.velocity.dot(right) * 0.009, 0.06), 6, dt);
+      this.root.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(this._leanF, 0, this._leanS)));
+      this.root.position.y += this._bob || 0;
+    }
+
     // head turns toward head yaw/pitch (relative to body)
     const bodyYaw = getYaw(this.root.quaternion);
     let rel = (mb.head.yaw ?? 0) - bodyYaw;
@@ -1568,6 +1637,7 @@ class MechView {
     } else {
       this.walkPhase += (mb.walk || 0) * dt * 0.62;
       const swing = Math.min(1, (mb.walk || 0) / 3.4) * 0.75;
+      this._bob = Math.abs(Math.sin(this.walkPhase)) * 0.18 * Math.min(1, (mb.walk || 0) / 3.4);
       for (let i = 0; i < 2; i++) {
         const L = this.legs[i];
         const ph = this.walkPhase + i * Math.PI;
@@ -2497,6 +2567,40 @@ function makeAsphaltNormal() {
   return normalFromHeight(cv, 1.6);
 }
 
+function makeSkylineTexture() {
+  // sparse lit windows for the distant silhouette ring — the city beyond
+  // the arena reads as inhabited instead of paper cutouts
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = 128;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#141126';
+  ctx.fillRect(0, 0, 128, 128);
+  for (let y = 4; y < 124; y += 7) {
+    for (let x = 4; x < 124; x += 6) {
+      if (Math.random() < 0.16) {
+        ctx.fillStyle = Math.random() < 0.75 ? 'rgba(255,220,150,0.8)' : 'rgba(150,210,255,0.7)';
+        ctx.fillRect(x, y, 2.6, 3.4);
+      }
+    }
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function makeRadialGlowTexture() {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 64;
+  const ctx = cv.getContext('2d');
+  const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.35)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(cv);
+}
+
 function makeAdTexture(variant) {
   // neon signage: glyph blocks and bars in a signature hue on near-black,
   // bright enough for the bloom pass to halo it
@@ -2526,6 +2630,21 @@ function makeAdTexture(variant) {
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
+}
+
+// Bake street-level ambient occlusion into vertex colors: geometry near
+// the ground sits in grime and bounce-shadow, towers brighten with height.
+// Grounds every structure without a single extra light.
+function bakeGroundAO(geo, dark = 0.5, upBy = 9) {
+  const pos = geo.attributes.position;
+  const cols = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const a = Math.min(1, Math.max(0, (pos.getY(i) - 0.4) / upBy));
+    const v = dark + a * (1 - dark);
+    cols[i * 3] = cols[i * 3 + 1] = cols[i * 3 + 2] = v;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  return geo;
 }
 
 // Rescale a BoxGeometry's UVs so a texture tiles in WORLD units (one tile

@@ -301,7 +301,7 @@ function handleEvents(snap) {
     const isMine = mech.id === mine.id;
     for (const ev of mech.ev || []) {
       switch (ev.what) {
-        case 'step': if (isMine) { sfx.thud(1); renderer.shake(0.14); } else sfx.thud(0.5); break;
+        case 'step': if (isMine) { sfx.thud(1); renderer.shake(0.14); } else sfx.thud(0.5); renderer.dust([mech.p[0], 0.5, mech.p[2]], 3); break;
         case 'punchWindup': sfx.whoosh(); break;
         case 'punchHit': sfx.clang(1.1); renderer.shake(0.4); hitstop(80); renderer.burst(mech.p, '#f5d76e', 12); break;
         case 'punchMiss': break;
