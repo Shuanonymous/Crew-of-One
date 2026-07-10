@@ -4,6 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { MECH } from '/shared/constants.js';
 
 // Everything visual. Style goals: stylized-cinematic — chunky low-poly
@@ -159,6 +160,10 @@ export class Renderer {
     // texels into giant blurry "pixels"
     this.windowTex.wrapS = this.windowTex.wrapT = THREE.RepeatWrapping;
     this.windowTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    // matching relief: recessed window glass, proud floor slabs
+    this.facadeNormal = makeFacadeNormal();
+    this.facadeNormal.wrapS = this.facadeNormal.wrapT = THREE.RepeatWrapping;
+    this.facadeNormal.anisotropy = this.windowTex.anisotropy;
 
     // palette state (lerped on wave changes)
     this.palA = PALETTES[0]; this.palB = PALETTES[0]; this.palT = 1;
@@ -513,16 +518,19 @@ export class Renderer {
         if (!this.asphaltTex) {
           this.asphaltTex = makeAsphaltTexture();
           this.asphaltRough = makeAsphaltRoughness();
-          for (const t of [this.asphaltTex, this.asphaltRough]) {
+          this.asphaltNorm = makeAsphaltNormal();
+          for (const t of [this.asphaltTex, this.asphaltRough, this.asphaltNorm]) {
             t.wrapS = t.wrapT = THREE.RepeatWrapping;
             t.repeat.set(26, 26);
           }
+          this.asphaltTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
         }
         const mesh = new THREE.Mesh(
           new THREE.BoxGeometry(...d.size),
           new THREE.MeshStandardMaterial({
             color: '#5a6478', map: this.asphaltTex,
             metalness: 0.72, roughness: 1.0, roughnessMap: this.asphaltRough,
+            normalMap: this.asphaltNorm, normalScale: new THREE.Vector2(0.7, 0.7),
             envMapIntensity: 1.25,
           })
         );
@@ -681,7 +689,7 @@ export class Renderer {
     for (const c of world.caches || []) {
       // armored supply crate: frame edges, glowing seam, stenciled lid
       const grp = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3),
+      const body = new THREE.Mesh(new RoundedBoxGeometry(3, 3, 3, 2, 0.22),
         new THREE.MeshStandardMaterial({ color: '#8f7a2e', metalness: 0.55, roughness: 0.5 }));
       body.castShadow = true;
       grp.add(body);
@@ -752,14 +760,14 @@ export class Renderer {
       const car = new THREE.Group();
       const [w, h, dp] = d.size;
       const body = new THREE.Mesh(
-        new THREE.BoxGeometry(w, h * 0.55, dp),
+        new RoundedBoxGeometry(w, h * 0.55, dp, 3, 0.18),
         new THREE.MeshStandardMaterial({ color: d.color, metalness: 0.75, roughness: 0.3, envMapIntensity: 1.2 })
       );
       body.position.y = 0.1;
       body.castShadow = true;
       car.add(body);
       const cabin = new THREE.Mesh(
-        new THREE.BoxGeometry(w * 0.5, h * 0.45, dp * 0.82),
+        new RoundedBoxGeometry(w * 0.5, h * 0.45, dp * 0.82, 2, 0.14),
         new THREE.MeshStandardMaterial({ color: '#0e1a26', metalness: 0.4, roughness: 0.12, envMapIntensity: 1.5 })
       );
       cabin.position.set(-w * 0.06, h * 0.42, 0);
@@ -967,7 +975,10 @@ export class Renderer {
     };
     for (const [color, geos] of Object.entries(body)) {
       const mesh = new THREE.Mesh(mergeGeometries(geos),
-        matFor('b' + color, () => new THREE.MeshLambertMaterial({ color, map: this.windowTex })));
+        matFor('b' + color, () => new THREE.MeshLambertMaterial({
+          color, map: this.windowTex,
+          normalMap: this.facadeNormal, normalScale: new THREE.Vector2(0.85, 0.85),
+        })));
       mesh.castShadow = mesh.receiveShadow = true;
       g.add(mesh);
       this.bldgBatchMeshes.push(mesh);
@@ -1355,11 +1366,13 @@ class MechView {
       m.castShadow = true; m.receiveShadow = true;
       parent.add(m); return m;
     };
-    const bevel = (w, h, d) => new THREE.BoxGeometry(w, h, d); // (kept simple for perf)
+    // every armor plate gets softened, machined edges — hard box corners
+    // are what reads as "blocky" once the light rakes across them
+    const bevel = (w, h, d) => new RoundedBoxGeometry(w, h, d, 2, Math.min(w, h, d) * 0.14);
 
     // ================= TORSO =================
     // tapered core (wider shoulders, narrow waist) built from stacked plates
-    P(this.root, new THREE.CylinderGeometry(2.5, 1.9, 3.4, 8), main, 0, 0.9, 0);   // upper chest drum
+    P(this.root, new THREE.CylinderGeometry(2.5, 1.9, 3.4, 16), main, 0, 0.9, 0);   // upper chest drum
     P(this.root, bevel(3.0, 1.6, 2.2), plate, 0, 1.6, -0.2);                        // chest plate
     P(this.root, bevel(1.8, 1.9, 1.8), dark, 0, -1.8, 0);                           // waist block
     P(this.root, bevel(2.6, 0.5, 2.2), plate, 0, -0.9, 0);                          // belt
@@ -1415,17 +1428,17 @@ class MechView {
       const hip = new THREE.Group();
       hip.position.set(side * 1.2, -2.6, 0);
       this.root.add(hip);
-      P(hip, new THREE.SphereGeometry(0.7, 10, 8), dark, 0, 0, 0);                 // hip ball
-      P(hip, new THREE.CylinderGeometry(0.9, 0.75, 2.4, 6), main, 0, -1.3, 0);     // thigh armor
+      P(hip, new THREE.SphereGeometry(0.7, 16, 12), dark, 0, 0, 0);                 // hip ball
+      P(hip, new THREE.CylinderGeometry(0.9, 0.75, 2.4, 14), main, 0, -1.3, 0);     // thigh armor
       P(hip, bevel(0.5, 1.8, 0.5), plate, side * 0.7, -1.3, 0.1);                  // thigh side plate
       P(hip, new THREE.CylinderGeometry(0.12, 0.12, 2.0, 6), piston, side * 0.35, -1.3, 0.55); // hydraulic rod
 
       const shinG = new THREE.Group();
       shinG.position.y = -2.6;
       hip.add(shinG);
-      P(shinG, new THREE.SphereGeometry(0.5, 8, 8), piston, 0, 0.1, 0);            // knee actuator
+      P(shinG, new THREE.SphereGeometry(0.5, 14, 10), piston, 0, 0.1, 0);            // knee actuator
       P(shinG, bevel(0.3, 0.9, 0.3), piston, 0, 0.55, 0.4);                        // knee piston
-      P(shinG, new THREE.CylinderGeometry(0.7, 0.55, 2.2, 6), main, 0, -1.1, 0);   // shin
+      P(shinG, new THREE.CylinderGeometry(0.7, 0.55, 2.2, 14), main, 0, -1.1, 0);   // shin
       P(shinG, bevel(1.0, 1.4, 0.4), plate, 0, -1.0, -0.55);                       // shin guard
       // splayed foot with toe plates + heel
       P(shinG, bevel(1.5, 0.5, 2.4), dark, 0, -2.3, -0.2);                         // foot base
@@ -1447,14 +1460,14 @@ class MechView {
       const s = side === 'L' ? -1 : 1;
       // upper arm: armored cylinder with a concentric cable sleeve
       const upper = new THREE.Group();
-      P(upper, new THREE.CylinderGeometry(0.5, 0.44, 1, 10), main, 0, 0, 0);
+      P(upper, new THREE.CapsuleGeometry(0.46, 0.55, 4, 14), main, 0, 0, 0);
       P(upper, new THREE.CylinderGeometry(0.6, 0.58, 0.28, 10), plate, 0, 0.34, 0); // shoulder cuff (stays tubular)
       // forearm: chromed piston ram + a darker outer housing at the elbow end
       const fore = new THREE.Group();
       P(fore, new THREE.CylinderGeometry(0.36, 0.34, 1, 10), piston, 0, 0, 0);      // bright ram core
       P(fore, new THREE.CylinderGeometry(0.52, 0.4, 0.5, 10), main, 0, 0.28, 0);    // forearm housing (elbow side)
       P(fore, new THREE.CylinderGeometry(0.4, 0.46, 0.22, 10), dark, 0, -0.42, 0);  // wrist collar (fist side)
-      const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.6, 12, 10), piston);
+      const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 12), piston);
       // fist: knuckle block + finger plates + emissive energy core
       const fist = new THREE.Group();
       P(fist, bevel(1.5, 1.3, 1.5), plate, 0, 0, 0);
@@ -1715,7 +1728,7 @@ class CrabView {
     this.flashMats = [shell, belly, dark];
 
     // domed rocky carapace (flat-shaded low-poly = chitinous, not a box)
-    const carapace = new THREE.Mesh(new THREE.IcosahedronGeometry(3.3, 1),
+    const carapace = new THREE.Mesh(new THREE.IcosahedronGeometry(3.3, 2),
       new THREE.MeshLambertMaterial({ color: style.shell, flatShading: true }));
     carapace.scale.set(1.05, 0.62, 0.92);
     carapace.position.y = 0.5;
@@ -1771,7 +1784,7 @@ class CrabView {
       this.root.add(armG);
       const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.85, 8, 6), dark);
       armG.add(shoulder);
-      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.85, 2.6, 7), dark);
+      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.62, 1.7, 4, 12), dark);
       arm.rotation.x = Math.PI / 2; arm.position.z = -1.2;
       armG.add(arm);
       // knuckle
@@ -1794,10 +1807,10 @@ class CrabView {
       for (let i = 0; i < 3; i++) {
         const legG = new THREE.Group();
         legG.position.set(s * 2.6, -0.4, -1.4 + i * 1.4);
-        const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.3, 2.0, 6), dark);
+        const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 1.5, 4, 10), dark);
         thigh.rotation.z = s * 1.0; thigh.position.set(s * 0.8, -0.3, 0);
         legG.add(thigh);
-        const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.12, 2.4, 6), dark);
+        const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.19, 2.0, 4, 10), dark);
         shin.position.set(s * 1.7, -1.4, 0); shin.rotation.z = s * 0.25;
         legG.add(shin);
         const foot = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.7, 5), shell);
@@ -1899,18 +1912,18 @@ class SpitterView {
     this.scene = scene;
     this.root = new THREE.Group();
     scene.add(this.root);
-    const skin = new THREE.MeshLambertMaterial({ color: '#5f7a2e', flatShading: true });
-    const belly = new THREE.MeshLambertMaterial({ color: '#b6c96a', flatShading: true });
+    const skin = new THREE.MeshStandardMaterial({ color: '#5f7a2e', roughness: 0.35, metalness: 0.05 }); // wet amphibian sheen
+    const belly = new THREE.MeshStandardMaterial({ color: '#b6c96a', roughness: 0.3, metalness: 0.05 });
     const dark = new THREE.MeshLambertMaterial({ color: '#38501c' });
     this.flashMats = [skin, belly, dark];
 
     // warty low-poly bulk
-    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(2.5, 1), skin);
+    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(2.5, 3), skin);
     body.scale.set(1.2, 0.82, 1.05);
     body.castShadow = true;
     this.root.add(body);
     // a distended acid-sac throat that inflates before it spits
-    this.throat = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 1), belly);
+    this.throat = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 3), belly);
     this.throat.position.set(0, -0.5, -1.7);
     this.root.add(this.throat);
     // gaping maw (wide cone) it fires through
@@ -1936,7 +1949,7 @@ class SpitterView {
       eye.add(pupil);
       this.root.add(eye);
       // splayed webbed legs (thigh + foot)
-      const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 1.5, 6), dark);
+      const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.42, 0.9, 4, 10), dark);
       thigh.position.set(s * 2.1, -1.3, 0.4); thigh.rotation.z = s * 0.6;
       this.root.add(thigh);
       const foot = new THREE.Mesh(new THREE.ConeGeometry(0.7, 0.5, 4), skin);
@@ -1989,12 +2002,12 @@ class FlyerView {
     const dark = new THREE.MeshLambertMaterial({ color: '#241a14' });
     this.flashMats = [hide, membrane, dark];
 
-    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 1), hide);
+    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 2), hide);
     body.scale.set(0.85, 0.8, 1.7);
     body.castShadow = true;
     this.root.add(body);
     // neck sweeping forward to a horned head
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.75, 1.9, 7), hide);
+    const neck = new THREE.Mesh(new THREE.CapsuleGeometry(0.6, 1.1, 4, 10), hide);
     neck.position.set(0, 0.55, -1.7); neck.rotation.x = 1.15;
     this.root.add(neck);
     const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.72, 0), hide);
@@ -2175,12 +2188,12 @@ class PigeonView {
     this.flashMats = [grey, lite];
     this.flashT = 0;
 
-    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(2.9, 1), grey);
+    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(2.9, 3), grey);
     body.scale.set(1, 0.95, 1.25);
     body.castShadow = true;
     body.position.y = 0.4;
     this.root.add(body);
-    const chest = new THREE.Mesh(new THREE.IcosahedronGeometry(2.1, 1), lite);
+    const chest = new THREE.Mesh(new THREE.IcosahedronGeometry(2.1, 3), lite);
     chest.position.set(0, -0.2, -1.4);
     this.root.add(chest);
 
@@ -2413,6 +2426,75 @@ function makeWindowTexture() {
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
+}
+
+// Convert a grayscale height canvas into a tangent-space normal map
+// (Sobel gradients), so flat geometry shows real relief under raking light.
+function normalFromHeight(cv, strength = 2.0) {
+  const w = cv.width, h = cv.height;
+  const src = cv.getContext('2d').getImageData(0, 0, w, h).data;
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const octx = out.getContext('2d');
+  const img = octx.createImageData(w, h);
+  const hgt = (x, y) => src[(((y + h) % h) * w + ((x + w) % w)) * 4] / 255;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = (hgt(x - 1, y) - hgt(x + 1, y)) * strength;
+      const dy = (hgt(x, y - 1) - hgt(x, y + 1)) * strength;
+      const inv = 1 / Math.hypot(dx, dy, 1);
+      const i = (y * w + x) * 4;
+      img.data[i] = (dx * inv * 0.5 + 0.5) * 255;
+      img.data[i + 1] = (dy * inv * 0.5 + 0.5) * 255;
+      img.data[i + 2] = (inv * 0.5 + 0.5) * 255;
+      img.data[i + 3] = 255;
+    }
+  }
+  octx.putImageData(img, 0, 0);
+  return new THREE.CanvasTexture(out);
+}
+
+// facade height field: windows punched in, floor slabs standing proud —
+// must match makeWindowTexture's grid (256x512, 64px floors, 32px bays)
+function makeFacadeNormal() {
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = 256;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#808080';
+  ctx.fillRect(0, 0, 128, 256);
+  for (let y = 0; y < 256; y += 32) {
+    ctx.fillStyle = '#9c9c9c';
+    ctx.fillRect(0, y, 128, 3);
+  }
+  for (let y = 7; y < 250; y += 32) {
+    for (let x = 5; x < 120; x += 16) {
+      ctx.fillStyle = '#525252'; // recessed glass
+      ctx.fillRect(x, y + 4, 11, 19);
+    }
+  }
+  return normalFromHeight(cv, 2.4);
+}
+
+// street height field: grain plus recessed cracks
+function makeAsphaltNormal() {
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = 128;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#828282';
+  ctx.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 1600; i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? '#8e8e8e' : '#747474';
+    ctx.fillRect(Math.random() * 128, Math.random() * 128, 1.6, 1.6);
+  }
+  ctx.strokeStyle = '#4a4a4a';
+  ctx.lineWidth = 1.2;
+  for (let c = 0; c < 5; c++) {
+    let x = Math.random() * 128, y = Math.random() * 128;
+    ctx.beginPath(); ctx.moveTo(x, y);
+    for (let s = 0; s < 7; s++) { x += (Math.random() - 0.5) * 26; y += (Math.random() - 0.5) * 26; ctx.lineTo(x, y); }
+    ctx.stroke();
+  }
+  return normalFromHeight(cv, 1.6);
 }
 
 function makeAdTexture(variant) {
