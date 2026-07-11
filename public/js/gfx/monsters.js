@@ -480,7 +480,7 @@ class SwarmView {
     }
     // single furious cyclops eye
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6),
-      new THREE.MeshStandardMaterial({ color: '#4a3a10', emissive: new THREE.Color('#ffcf3f'), emissiveIntensity: 0.9, roughness: 0.3 }));
+      new THREE.MeshStandardMaterial({ color: '#4a3a10', emissive: new THREE.Color('#ffcf3f'), emissiveIntensity: 0.7, roughness: 0.3 }));
     eye.position.set(0, 0.22, -0.6);
     const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.14, 6, 6),
       new THREE.MeshStandardMaterial({ color: '#1d2033', roughness: 0.2 }));

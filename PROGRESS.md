@@ -8,7 +8,75 @@ Four modes, a QA-gated deploy pipeline, no accounts.
 
 ---
 
-# LATEST OVERHAUL (serious cinematic identity + 4 modes + QA gate)
+# LATEST OVERHAUL — "STEEL RAIN": ground-up art/sound/feel revamp
+
+The full art direction is documented in **ART_DIRECTION.md**. Summary of
+what was rebuilt (game rules, netcode, and server logic untouched —
+every existing test still passes):
+
+## Rendering (public/js/render.js + public/js/gfx/*)
+- The render layer was rewritten into modules: `gfx/materials.js`
+  (procedural PBR texture authoring), `gfx/post.js` (post chain),
+  `gfx/mech.js`, `gfx/monsters.js`, `gfx/world.js`, with `render.js` as
+  the orchestrator (atmosphere, weather, camera, FX, interpolation).
+- One committed filmic look (storm night) replaces the palette-cycling
+  sunset/neon look: cold key + warm sodium counter-light + cool rim,
+  FogExp2 that breathes with wind gusts, storm-cloud sky dome, PMREM
+  environment reflections, ACES + a custom grade pass (teal–orange
+  split-tone, grain, vignette, edge CA), tight bloom, GTAO on high tier.
+- Every surface carries authored albedo/normal/roughness canvases:
+  chipped stenciled mech plate, three facade families with lit-window
+  emissive sheets, wet asphalt with mirror puddles, Voronoi chitin,
+  wrinkle-fold hide, warty amphibian skin, feather rows. Kaiju hulls are
+  fBm-displaced so nothing reads as a sphere/box primitive.
+- Weather 2.0: instanced wind-sheared rain streaks (one draw call),
+  ground splash rings, drifting mist sheets, horizon lightning with real
+  jagged bolt meshes + delayed thunder, drifting embers.
+- Feel: rotational handheld camera (drift + trauma flinches), FOV
+  punch-in on impacts, hit-stop retained, spark showers on metal hits,
+  textured smoke/flare sprites, scorch decals, hull-critical red grade
+  bleed at low integrity.
+- Performance: static city merged into a handful of draw calls; software
+  rasterizers (CI/SwiftShader) auto-detected and shed MSAA/bloom/grade/
+  anisotropy — software fps is now *above* the previous renderer's.
+  `?fullfx` query param forces the full chain for screenshots/look-dev.
+
+## UI (public/style.css + index.html)
+- Full redesign: military-industrial dark glass — chamfered panels,
+  hairline strokes, stencil type with wide tracking, amber command
+  accents, segmented integrity/laser/boss bars, restyled title, lobby,
+  shop, end, settings, pings, damage numbers. Emoji labels retired.
+
+## Audio (public/js/sfx.js)
+- Impacts rebuilt for weight: inharmonic struck-plate clang partials +
+  bright strike transient + sub thump; servo whine under punch windups;
+  footstep ground-slam with armor-rattle tick; crash = hot blast
+  sweeping to rumble with scattered debris crackle.
+- New looping storm ambience bed (rain patter, LFO gusting wind, city
+  rumble) that fades in with each run and out at run end/leave.
+- Adaptive music system unchanged (still all-synthesized).
+
+## Honest scope notes
+- Textures/models remain 100% procedural (no downloaded/hand-painted
+  asset files) — "high fidelity" here means real PBR material response,
+  authored maps, and filmic light/post, not photo scans or sculpted
+  meshes. Screen-space reflections, motion blur, and a recorded score
+  remain future work.
+- The physics engine is still cannon-es (as before).
+
+## QA evidence (this revamp, run in this container)
+- `npm test` (server logic + rooms + full Playwright E2E): **ALL PASS**,
+  including "no console errors across all flows".
+- Playtest bot (60 s smoke, software GL): no console errors, no NaN
+  positions, main-thread frame cost avg 0.57 ms (~1769 fps capable),
+  memory growth +32.6 MB (healthy), software fps ~5 (above the old
+  renderer's ~4 on the same container).
+- Visual verification: scripted Playwright screenshot passes (title,
+  lobby, in-run, combat) reviewed at each iteration.
+
+---
+
+# PREVIOUS OVERHAUL (serious cinematic identity + 4 modes + QA gate)
 
 ## Section 1 — Critical bug fixes (shipped first as a hotfix)
 - **Shop click bug (root cause + fix):** the shop overlay re-rendered its

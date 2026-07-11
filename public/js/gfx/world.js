@@ -653,7 +653,7 @@ function addBillboard(R, g, d) {
   const face = new THREE.Mesh(new THREE.PlaneGeometry(bw, bh),
     new THREE.MeshStandardMaterial({
       color: '#05060a',
-      emissive: new THREE.Color('#ffffff'), emissiveMap: R._adTex[d.v % 3], emissiveIntensity: 1.4,
+      emissive: new THREE.Color('#ffffff'), emissiveMap: R._adTex[d.v % 3], emissiveIntensity: 0.85,
       roughness: 0.6,
     }));
   face.position.z = 0.16;

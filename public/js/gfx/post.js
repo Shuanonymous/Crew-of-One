@@ -74,14 +74,19 @@ const GradeShader = {
 
 // Build the full chain. GTAO is created lazily (only when a tier wants it)
 // because its render targets are the priciest part of the pipeline.
-export function buildPost(renderer, scene, camera) {
+// `software` = no-GPU rasterizer (SwiftShader/llvmpipe): skip MSAA and the
+// bloom mip chain entirely — they multiply per-pixel CPU cost several-fold.
+export function buildPost(renderer, scene, camera, software = false) {
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
-  const rt = new THREE.WebGLRenderTarget(size.x, size.y, { samples: 4, type: THREE.HalfFloatType });
-  const composer = new EffectComposer(renderer, rt);
+  const composer = software
+    ? new EffectComposer(renderer)
+    : new EffectComposer(renderer,
+      new THREE.WebGLRenderTarget(size.x, size.y, { samples: 4, type: THREE.HalfFloatType }));
   composer.addPass(new RenderPass(scene, camera));
 
   const post = {
     composer,
+    software,
     gtao: null,
     bloom: new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.55, 0.42, 0.88),
     grade: new ShaderPass(GradeShader),
@@ -90,6 +95,7 @@ export function buildPost(renderer, scene, camera) {
     _camera: camera,
 
     ensureGtao(on) {
+      if (this.software) on = false;
       if (on && !this.gtao) {
         this.gtao = new GTAOPass(scene, camera, size.x, size.y);
         this.gtao.output = GTAOPass.OUTPUT.Default;
@@ -113,11 +119,18 @@ export function buildPost(renderer, scene, camera) {
       this.grade.uniforms.uTime.value = (performance.now() % 4000) / 4000;
     },
 
-    render() { composer.render(); },
+    // software: draw straight to screen (tone mapping still applies) —
+    // the composer round-trip costs a full extra screen blit on CPU
+    render() {
+      if (this.software) renderer.render(scene, camera);
+      else composer.render();
+    },
   };
 
-  composer.addPass(post.bloom);
-  composer.addPass(post.grade);
+  if (!software) {
+    composer.addPass(post.bloom);
+    composer.addPass(post.grade);
+  }
   composer.addPass(post.out);
   return post;
 }

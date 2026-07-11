@@ -5,8 +5,14 @@
 A cinematic co-op kaiju brawler for your browser. 2–8 friends join a room with a
 4-letter code and jointly pilot **ONE huge, heavy mech** — someone drives
 the legs, someone controls the arms, and someone aims the head-mounted beam.
-Original monsters attack a neon city while the crew coordinates movement,
-melee, rockets, cannon fire, and laser timing.
+Original monsters tear through a storm-lit coastal city while the crew
+coordinates movement, melee, rockets, cannon fire, and laser timing.
+
+The look is **STEEL RAIN** — a grounded, filmic storm night: PBR materials
+authored procedurally at load (chipped stenciled armor, lit windows, mirror
+puddles, chitin and hide), a cinema post chain (AO, bloom, teal–orange
+grade, grain), wind-sheared rain, and a handheld documentary camera. See
+**ART_DIRECTION.md**.
 
 **Modes:** Classic Wave Mode (waves + safe between-wave upgrade shop) · Endless Escalation (danger clock + field supply beacons) · Mech Duel (crew vs crew) · Training Course (learn the mech without being eaten)
 
@@ -31,3 +37,4 @@ Click-by-click instructions: see **PLAYTEST.md**.
 
 - **PLAYTEST.md** — plain-language guide: putting it online + running a game night
 - **PROGRESS.md** — everything built, every design decision, testing evidence
+- **ART_DIRECTION.md** — the STEEL RAIN look bible: how every material, light, and sound is authored

@@ -43,7 +43,18 @@ export class Renderer {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.28;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    setMaxAnisotropy(this.renderer.capabilities.getMaxAnisotropy());
+    // no-GPU rasterizer (CI containers, bare VMs): shed the features that
+    // multiply per-pixel CPU cost so the game stays playable/testable
+    try {
+      const gl = this.renderer.getContext();
+      const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      const gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '';
+      this.software = /swiftshader|llvmpipe|softpipe|software/i.test(String(gpu));
+    } catch { this.software = false; }
+    // ?fullfx forces the full cinematic chain even on a software rasterizer
+    // (screenshots, look-dev on machines that misreport their GPU)
+    if (new URLSearchParams(location.search).has('fullfx')) this.software = false;
+    setMaxAnisotropy(this.software ? 1 : this.renderer.capabilities.getMaxAnisotropy());
 
     this.scene = new THREE.Scene();
     // storm deck: a slowly-turning cloud dome, lit from below at the horizon
@@ -221,8 +232,9 @@ export class Renderer {
     this.applyPalette(this.palA);
 
     // cinema post chain: AO -> bloom -> grade -> tone map
-    this.post = buildPost(this.renderer, this.scene, this.camera);
+    this.post = buildPost(this.renderer, this.scene, this.camera, this.software);
     this.composer = this.post.composer;
+    if (this.software) this.setQuality('low');
 
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -257,12 +269,14 @@ export class Renderer {
 
   setQuality(q) {
     const dpr = window.devicePixelRatio || 1;
-    const opts = {
+    let opts = {
       low: { pr: Math.min(dpr, 1) * 0.85, shadows: false, gtao: false, bloom: 0.32, fogM: 1.5, rain: 300, mist: false, embers: false },
       medium: { pr: Math.min(dpr, 1.75), shadows: true, gtao: false, bloom: 0.5, fogM: 1.0, rain: 700, mist: true, embers: true },
       high: { pr: Math.min(dpr, 2), shadows: true, gtao: true, bloom: 0.6, fogM: 0.82, rain: RAIN_MAX, mist: true, embers: true },
     }[q];
     if (!opts) return;
+    // software rasterizer: fill rate is everything — force the floor tier
+    if (this.software) opts = { pr: 0.7, shadows: false, gtao: false, bloom: 0, fogM: 1.2, rain: 160, mist: false, embers: false };
     this.renderer.setPixelRatio(opts.pr);
     this.renderer.shadowMap.enabled = opts.shadows;
     this.sun.castShadow = opts.shadows;
