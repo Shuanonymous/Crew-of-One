@@ -107,6 +107,58 @@ try {
   await clickBtn(host, '#btn-settings-close');
   check('settings persists master volume', await host.evaluate(() => JSON.parse(localStorage.getItem('coo-settings')).master === 0.3));
 
+  // ---------- HANGAR: collaborative customization (2 real clients) ----------
+  {
+    try { await host?.context().close(); } catch {}
+    try { await guest?.context().close(); } catch {}
+    host = await newClient('HOST');
+    guest = await newClient('GUEST');
+    await host.waitForFunction(() => window.__coo && window.__coo.net.playerId, { timeout: 15000 });
+    await host.fill('#name-input', 'Host');
+    await clickBtn(host, '#btn-create');
+    await host.waitForFunction(() => /^[A-Z]{4}$/.test(document.getElementById('lobby-code').textContent.trim()), { timeout: 15000 });
+    const code = (await host.textContent('#lobby-code')).trim();
+    await guest.waitForFunction(() => window.__coo && window.__coo.net.playerId, { timeout: 15000 });
+    await guest.fill('#name-input', 'Guest');
+    await guest.fill('#code-input', code);
+    await clickBtn(guest, '#btn-join');
+    await guest.waitForFunction(() => window.__coo.state.room?.players.length >= 2, { timeout: 8000 });
+    await host.waitForFunction(() => !!window.__coo.state.loadout, { timeout: 6000 });
+    check('HANGAR: loadout state synced to both clients',
+      await host.evaluate(() => !!window.__coo.state.loadout?.build) &&
+      await guest.evaluate(() => !!window.__coo.state.loadout?.build));
+
+    // guest proposes a SHARED layer (frame) — must NOT apply directly
+    await guest.evaluate(() => window.__coo.net.send({ t: 'loadout', op: 'propose', layer: 'frame', value: 'bastion' }));
+    await host.waitForFunction(() => window.__coo.state.loadout?.proposals?.frame?.value === 'bastion', { timeout: 5000 });
+    check('HANGAR: guest pick lands as a named proposal, not an overwrite',
+      await host.evaluate(() => {
+        const lo = window.__coo.state.loadout;
+        return lo.build.frame === 'warden' && lo.proposals.frame.byName === 'Guest';
+      }));
+    // host vote makes it a majority -> auto-applies
+    await host.evaluate(() => window.__coo.net.send({ t: 'loadout', op: 'vote', layer: 'frame', value: true }));
+    await guest.waitForFunction(() => window.__coo.state.loadout?.build.frame === 'bastion', { timeout: 5000 });
+    check('HANGAR: majority vote applies the proposal on every client',
+      await host.evaluate(() => window.__coo.state.loadout.build.frame === 'bastion'));
+
+    // server rejects incompatible parts (vector legs need a lighter frame)
+    await host.evaluate(() => window.__coo.net.send({ t: 'loadout', op: 'set', layer: 'legs', value: 'vector' }));
+    await host.waitForTimeout(500);
+    check('HANGAR: server validation blocks incompatible parts',
+      await host.evaluate(() => window.__coo.state.loadout.build.legs !== 'vector'));
+
+    // ready flow
+    await clickBtn(host, '#btn-ready');
+    await guest.waitForFunction(() => (window.__coo.state.loadout?.ready || []).length === 1, { timeout: 5000 });
+    check('HANGAR: ready state broadcasts to the crew',
+      await guest.evaluate(() => window.__coo.state.loadout.ready.length === 1));
+    check('HANGAR: 3D preview mech is live', await host.evaluate(() => !!window.__coo.hangar.fab));
+    await host.context().close();
+    await guest.context().close();
+    host = null; guest = null;
+  }
+
   // ---------- MODE 1: ENDLESS — move, attack, shop-click purchase ----------
   ({ host, guest } = await startMode(host, guest, 'brawl'));
   check('ENDLESS launched for both clients',

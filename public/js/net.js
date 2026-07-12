@@ -17,6 +17,7 @@ export class Net {
     this.onErr = () => {};
     this.onStatus = () => {};
     this.onSnapshot = () => {};
+    this.onLoadout = () => {};
   }
 
   connect() {
@@ -50,6 +51,7 @@ export class Net {
           break;
         case MSG.ERR: this.onErr(msg.msg); break;
         case 'ping': this.onPing?.(msg); break;
+        case 'loadout': this.loadout = msg; this.onLoadout(msg); break;
       }
     };
   }

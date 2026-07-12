@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CREW OF ONE — co-op kaiju brawler</title>
-  <meta name="description" content="2-8 friends pilot ONE giant mech. Someone is the legs. Someone is the arms. Someone is the head. Good luck." />
+  <title>CREW OF ONE — cooperative mech combat</title>
+  <meta name="description" content="2-8 pilots crew ONE giant mech against the Abyssals. Customize the machine together, then hold the district." />
   <link rel="stylesheet" href="/style.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>" />
   <script type="importmap">
@@ -19,18 +19,18 @@
 
   <!-- ============================== TITLE ============================== -->
   <div id="screen-title" class="screen">
-    <div class="title-card">
-      <div class="title-kicker">2–8 FRIENDS · ONE GIANT MECH · ONE CREW</div>
-      <h1 class="title-logo">CREW<span class="title-of">of</span>ONE</h1>
-      <div class="title-sub">cinematic co-op mech combat where every pilot controls a critical system</div>
+    <div class="title-card panel-glass">
+      <div class="title-kicker">AEGIS WATCH · COMBINED CREW PROGRAM</div>
+      <h1 class="title-logo">CREW<span class="title-of">OF</span>ONE</h1>
+      <div class="title-sub">2–8 pilots. One war machine. Every station is a person.</div>
       <div class="title-form">
-        <input id="name-input" maxlength="16" placeholder="your pilot name" autocomplete="off" />
-        <button id="btn-create" class="btn btn-big">CREATE ROOM</button>
+        <input id="name-input" maxlength="16" placeholder="PILOT CALLSIGN" autocomplete="off" />
+        <button id="btn-create" class="btn btn-big">FORM A CREW</button>
         <div class="join-row">
           <input id="code-input" maxlength="4" placeholder="CODE" autocomplete="off" />
           <button id="btn-join" class="btn">JOIN</button>
         </div>
-        <button id="btn-howto" class="btn btn-ghost">HOW TO PLAY</button>
+        <button id="btn-howto" class="btn btn-ghost">FIELD MANUAL</button>
       </div>
       <div id="title-error" class="error-text"></div>
     </div>
@@ -38,69 +38,79 @@
 
   <!-- ============================== HOW TO ============================= -->
   <div id="screen-howto" class="screen hidden">
-    <div class="panel howto-panel">
-      <h2>HOW TO PLAY <span class="howto-time">(30 seconds)</span></h2>
-      <p class="howto-lead">Your crew pilots <b>ONE giant mech</b>. Each pilot is a different body part. The danger clock never stops climbing — kill for credits, spend them at glowing <b>SUPPLY BEACONS</b>, and survive. Press <b>Q</b> to ping targets for your crew.</p>
+    <div class="panel panel-glass howto-panel">
+      <h2>FIELD MANUAL <span class="howto-time">(30 seconds)</span></h2>
+      <p class="howto-lead">Your crew pilots <b>ONE giant mech</b>. Each pilot runs a different station. In the hangar you build the machine together; in the field you keep it standing. Press <b>Q</b> to mark targets for your crew.</p>
       <div class="howto-roles">
-        <div class="howto-role" style="--rc: #2a9d8f">
-          <div class="hr-title">🦵 THE LEGS</div>
+        <div class="howto-role" style="--rc: #4dc9a0">
+          <div class="hr-title">LOCOMOTION — THE LEGS</div>
           <div class="hr-keys"><span class="key">W A S D</span> walk &nbsp; <span class="key">SPACE</span> kick</div>
-          <div class="hr-desc">The kick is mighty, but you're on one leg. Falling over is your fault.</div>
+          <div class="hr-desc">The kick is devastating, but you're on one leg. Balance is your responsibility.</div>
         </div>
-        <div class="howto-role" style="--rc: #e76f51">
-          <div class="hr-title">👊 THE ARMS</div>
-          <div class="hr-keys"><span class="key">MOUSE</span> aim &nbsp; <span class="key">CLICK</span> punch (L/R buttons = L/R fist)</div>
-          <div class="hr-desc">Punches wind up before they land. Start swinging BEFORE the crab arrives.</div>
+        <div class="howto-role" style="--rc: #d88a5c">
+          <div class="hr-title">STRIKE — THE ARMS</div>
+          <div class="hr-keys"><span class="key">MOUSE</span> aim &nbsp; <span class="key">CLICK</span> punch (L/R = L/R fist)</div>
+          <div class="hr-desc">Punches wind up before they land. Commit early, follow through.</div>
         </div>
-        <div class="howto-role" style="--rc: #9b5de5">
-          <div class="hr-title">👁 THE HEAD</div>
-          <div class="hr-keys"><span class="key">MOUSE</span> aim &nbsp; <span class="key">HOLD CLICK</span> charge eye laser</div>
-          <div class="hr-desc">3 seconds to charge; the mech slows to a crawl while firing. Sweep the beam.</div>
+        <div class="howto-role" style="--rc: #9b7de5">
+          <div class="hr-title">FIRE CONTROL — THE HEAD</div>
+          <div class="hr-keys"><span class="key">MOUSE</span> aim &nbsp; <span class="key">HOLD CLICK</span> charge the beam</div>
+          <div class="hr-desc">Three seconds to charge; the mech slows while firing. Sweep the beam across the pack.</div>
         </div>
       </div>
-      <p class="howto-foot">Named kaiju arrive as the danger clock climbs. Fuel tanks explode when hit (use them), repair stations heal you (monsters wreck them), caches hold credits. Roles shuffle every run. The mech turns to face wherever the HEAD looks.</p>
-      <button id="btn-howto-back" class="btn btn-big">GOT IT</button>
+      <p class="howto-foot">Named Abyssals surface as the danger clock climbs. Fuel tanks detonate when struck. Repair pads rebuild plate. Stations rotate every run. The hull turns to face wherever FIRE CONTROL looks.</p>
+      <button id="btn-howto-back" class="btn btn-big">UNDERSTOOD</button>
     </div>
   </div>
 
-  <!-- ============================== LOBBY ============================== -->
-  <div id="screen-lobby" class="screen hidden">
-    <div class="panel lobby-panel">
-      <div class="lobby-code-row">
-        <div>
-          <div class="lobby-label">ROOM CODE</div>
-          <div id="lobby-code" class="lobby-code">----</div>
-        </div>
-        <button id="btn-copy-link" class="btn">COPY INVITE LINK</button>
+  <!-- ==================== HANGAR (lobby + customization) =============== -->
+  <div id="screen-lobby" class="screen screen-hangar hidden">
+    <div class="hg-topbar">
+      <div class="hg-code-block panel-glass">
+        <div class="lobby-label">CREW CODE</div>
+        <div id="lobby-code" class="lobby-code">----</div>
+        <button id="btn-copy-link" class="btn btn-small">COPY INVITE LINK</button>
       </div>
-      <div class="lobby-cols">
-        <div>
-          <div class="lobby-label">CREW</div>
-          <ul id="lobby-players" class="lobby-players"></ul>
-        </div>
-        <div>
-          <div class="lobby-label">MODE <span id="mode-hint" class="mode-hint">(host picks)</span></div>
-          <div id="mode-list" class="mode-list">
-            <button class="mode-btn" data-mode="classic">
-              <b>🌊 CLASSIC WAVE MODE</b><span>Beginner-friendly waves, safe between-wave shop, ready up for the next assault.</span>
-            </button>
-            <button class="mode-btn" data-mode="brawl">
-              <b>⏱ ENDLESS ESCALATION</b><span>Advanced survival. Danger climbs forever; spend at supply beacons under pressure.</span>
-            </button>
-            <button class="mode-btn" data-mode="duel">
-              <b>🤖 MECH DUEL</b><span>Two crews, two mechs, one plaza. Needs 2+ pilots.</span>
-            </button>
-            <button class="mode-btn" data-mode="training">
-              <b>🎈 TRAINING</b><span>Rings, dummies, a balloon. Learn the mech without being eaten.</span>
-            </button>
-          </div>
+      <div class="hg-title panel-glass">
+        <div class="hg-bay">HANGAR BAY 07</div>
+        <div id="hg-callsign" class="hg-callsign">IRONWAKE</div>
+      </div>
+      <div class="hg-mode panel-glass">
+        <div class="lobby-label">OPERATION <span id="mode-hint" class="mode-hint">(host picks)</span></div>
+        <div id="mode-list" class="mode-list">
+          <button class="mode-btn" data-mode="classic"><b>CLASSIC WAVE DEFENCE</b><span>Discrete assaults, safe refit between waves.</span></button>
+          <button class="mode-btn" data-mode="brawl"><b>ENDLESS ESCALATION</b><span>The danger clock never stops. Refit under fire.</span></button>
+          <button class="mode-btn" data-mode="duel"><b>MECH DUEL</b><span>Two crews, mirrored machines, one district. 2+ pilots.</span></button>
+          <button class="mode-btn" data-mode="training"><b>TRAINING</b><span>Proving ground. Hot-swap components live.</span></button>
         </div>
       </div>
-      <div class="lobby-foot">
-        <button id="btn-leave" class="btn btn-ghost">LEAVE</button>
-        <button id="btn-start" class="btn btn-big">START</button>
+    </div>
+
+    <div class="hg-left panel-glass hg-panel">
+      <div class="lobby-label">CREW STATIONS</div>
+      <ul id="lobby-players" class="lobby-players"></ul>
+      <div class="hg-ready-row">
+        <button id="btn-ready" class="btn">READY</button>
+        <div id="hg-ready-note" class="hg-note"></div>
       </div>
+      <div class="lobby-label" style="margin-top:12px">BUILD SPEC</div>
+      <div id="hg-stats" class="hg-stats"></div>
+      <div id="hg-budget" class="hg-note"></div>
+      <div class="hg-preset-row">
+        <button id="btn-preset-save" class="btn btn-small">SAVE PRESET</button>
+        <select id="preset-select" class="hg-select"><option value="">LOAD PRESET…</option></select>
+      </div>
+    </div>
+
+    <div class="hg-right panel-glass hg-panel">
+      <div id="hg-tabs" class="hg-tabs"></div>
+      <div id="hg-custom" class="hg-custom"></div>
+    </div>
+
+    <div class="hg-bottom">
+      <button id="btn-leave" class="btn btn-ghost">LEAVE</button>
       <div id="lobby-error" class="error-text"></div>
+      <button id="btn-start" class="btn btn-big">LAUNCH OPERATION</button>
     </div>
   </div>
 
@@ -110,30 +120,44 @@
 
   <div id="hud" class="hidden">
     <div id="boss-bar" class="hidden">
-      <div id="boss-name">GARY</div>
+      <div id="boss-name">—</div>
       <div id="boss-hp"><div id="boss-hp-fill"></div></div>
     </div>
+
     <div id="role-banner">
-      <div id="role-label">YOU ARE</div>
-      <div id="role-name">THE LEGS</div>
+      <div id="role-label">STATION</div>
+      <div id="role-name">LOCOMOTION</div>
       <div id="role-keys" class="role-keys"></div>
     </div>
 
     <div id="hp-wrap">
-      <div class="hud-label">MECH INTEGRITY</div>
-      <div id="hp-bar"><div id="hp-fill"></div></div>
+      <svg id="mech-status" viewBox="0 0 40 56" aria-hidden="true">
+        <g id="ms-fig">
+          <path id="ms-head" d="M16 2 h8 v6 h-8 z" />
+          <path id="ms-torso" d="M12 10 h16 l2 12 h-20 z" />
+          <path id="ms-armL" d="M6 11 h5 v14 h-4 z" />
+          <path id="ms-armR" d="M29 11 h5 l-1 14 h-4 z" />
+          <path id="ms-legL" d="M13 24 h6 v10 l-2 18 h-5 l1 -18 z" />
+          <path id="ms-legR" d="M21 24 h6 l0 10 l1 18 h-5 l-2 -18 z" />
+        </g>
+      </svg>
+      <div class="hp-col">
+        <div class="hud-label">HULL INTEGRITY</div>
+        <div id="hp-bar"><div id="hp-fill"></div></div>
+        <div id="sys-readout"></div>
+      </div>
     </div>
 
-    <div id="wave-pill" class="hud-pill">WAVE 1</div>
+    <div id="wave-pill" class="hud-pill">—</div>
     <div id="credits-pill" class="hud-pill">© 0</div>
-    <button id="btn-upgrades" class="hud-action hidden">UPGRADES (B)</button>
+    <button id="btn-upgrades" class="hud-action hidden">REFIT <span class="key-hint">B</span></button>
     <div id="duel-hp-wrap" class="hidden">
       <div class="hud-label">ENEMY MECH</div>
       <div id="duel-hp-bar"><div id="duel-hp-fill"></div></div>
     </div>
 
     <div id="laser-wrap" class="hidden">
-      <div class="hud-label">EYE LASER</div>
+      <div class="hud-label">CONVERGENCE BEAM</div>
       <div id="laser-bar"><div id="laser-fill"></div></div>
     </div>
 
@@ -143,39 +167,40 @@
     <div id="objectives" class="hidden"></div>
 
     <div id="click-catch">
-      <div id="click-card">
-        <h1 id="click-role">YOU ARE THE LEGS</h1>
-        <p id="click-desc">Click to grab the controls</p>
+      <div id="click-card" class="panel-glass">
+        <div class="click-kicker">STATION ASSIGNMENT</div>
+        <h1 id="click-role">LOCOMOTION</h1>
+        <p id="click-desc">Click to take the controls</p>
       </div>
     </div>
   </div>
 
   <!-- ============================== SHOP =============================== -->
-  <div id="screen-shop" class="screen hidden">
-    <div class="panel shop-panel">
+  <div id="screen-shop" class="screen screen-side hidden">
+    <div class="panel panel-glass shop-panel">
       <div class="shop-head">
-        <h2 id="shop-title">📡 SUPPLY SHOP</h2>
-        
+        <h2 id="shop-title">REFIT BAY</h2>
+        <span id="shop-timer" class="shop-timer"></span>
       </div>
-      <div id="shop-sub" class="shop-sub">Anyone can spend the crew's credits. Classic mode is safe between waves; Endless uses field beacons.</div>
-      <div class="shop-credits">CREW CREDITS: <span id="shop-credits">0</span></div>
+      <div id="shop-sub" class="shop-sub"></div>
+      <div class="shop-credits">CREW CREDITS <span id="shop-credits">0</span></div>
       <div id="shop-items" class="shop-items"></div>
       <div class="shop-foot">
         <span id="shop-hint"></span>
-        <button id="btn-shop-done" class="btn btn-big hidden">NEXT WAVE →</button>
+        <button id="btn-shop-done" class="btn btn-big hidden">NEXT WAVE</button>
       </div>
     </div>
   </div>
 
   <!-- ============================ RUN OVER ============================= -->
   <div id="screen-end" class="screen hidden">
-    <div class="panel end-panel">
-      <h2 id="end-title">THE MECH IS DOWN</h2>
-      <div id="end-big" class="end-big">MADE IT TO WAVE 4</div>
+    <div class="panel panel-glass end-panel">
+      <h2 id="end-title">OPERATION REPORT</h2>
+      <div id="end-big" class="end-big">—</div>
       <div id="end-stats" class="end-stats"></div>
       <div class="end-foot">
-        <button id="btn-end-lobby" class="btn btn-ghost">BACK TO LOBBY</button>
-        <button id="btn-again" class="btn btn-big">ONE MORE RUN</button>
+        <button id="btn-end-lobby" class="btn btn-ghost">RETURN TO HANGAR</button>
+        <button id="btn-again" class="btn btn-big">REDEPLOY</button>
       </div>
       <div id="end-hint" class="mode-hint"></div>
     </div>
@@ -184,8 +209,8 @@
   <button id="btn-settings" title="Settings">⚙</button>
 
   <div id="screen-settings" class="screen hidden">
-    <div class="panel settings-panel">
-      <h2>SETTINGS</h2>
+    <div class="panel panel-glass settings-panel">
+      <h2>SYSTEMS</h2>
       <label>Master volume <input id="set-master" type="range" min="0" max="1" step="0.05" value="0.5" /></label>
       <label>Music volume <input id="set-music" type="range" min="0" max="0.6" step="0.02" value="0.32" /></label>
       <label>Screen shake
@@ -198,12 +223,13 @@
       <label>SFX volume <input id="set-sfxvol" type="range" min="0" max="1" step="0.05" value="0.5" /></label>
       <div class="keybinds">
         <b>KEYBINDS</b>
-        <span><i>WASD</i> walk · <i>SPACE</i> kick · <i>F</i> dash (with thrusters)</span>
-        <span><i>MOUSE</i> aim · <i>L/R CLICK or J/K</i> punch · <i>HOLD CLICK / E</i> laser</span>
-        <span><i>Q</i> ping target/location · <i>X</i> danger ping · <i>ESC</i> settings</span>
+        <span><i>WASD</i> walk · <i>SPACE</i> kick · <i>F</i> dash (thruster legs)</span>
+        <span><i>MOUSE</i> aim · <i>L/R CLICK or J/K</i> punch · <i>HOLD CLICK / E</i> beam</span>
+        <span><i>C / hold R-CLICK</i> cannon · <i>R</i> rockets · <i>B</i> refit</span>
+        <span><i>Q</i> mark target · <i>X</i> danger ping · <i>ESC</i> systems</span>
       </div>
       <div id="settings-pause-note" class="mode-hint"></div>
-      <button id="btn-settings-close" class="btn btn-big">RESUME / BACK</button>
+      <button id="btn-settings-close" class="btn btn-big">RESUME</button>
     </div>
   </div>
 

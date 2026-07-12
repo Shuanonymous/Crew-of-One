@@ -1,13 +1,14 @@
 {
   "name": "crew-of-one",
   "version": "0.1.0",
-  "description": "Cinematic co-op kaiju brawler: 2-8 friends jointly pilot one huge mech against original monsters.",
+  "description": "Cinematic co-op mech combat: 2-8 pilots crew one customizable war machine against original bio-titans.",
   "type": "module",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node test/server-logic.test.js && node test/rooms.test.js && node test/e2e.test.js",
+    "test": "node test/server-logic.test.js && node test/rooms.test.js && node test/loadout.test.js && node test/e2e.test.js",
     "playtest": "node test/playtest-bot.test.js",
+    "visual": "node test/visual.test.js",
     "qa": "npm test && npm run playtest"
   },
   "engines": {

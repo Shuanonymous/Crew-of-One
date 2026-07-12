@@ -24,3 +24,14 @@ These instructions apply to the whole repository.
 - Update `PLAYTEST.md` when player-facing controls, modes, deployment steps, known quirks, or playtest guidance changes.
 - Explain any manual Render/deployment steps in simple, non-developer language.
 - If Render is already connected to GitHub, assume merging the PR to the linked deploy branch triggers deployment unless repo evidence says otherwise.
+
+## V2 additions (claude/v2-visual-mech-rebuild-wu5u5g)
+- The customization catalog and ALL gameplay stat derivation live in
+  `shared/loadout.js`; never let a client send stats. Server-side session
+  rules live in `server/loadout.js` (ownership/proposals/votes/locks).
+- Visible model changes belong in the fab modules (`mechfab.js`,
+  `monsterfab.js`, `cityfab.js`) — no raw primitives on gameplay models;
+  use the plate/lathe/vent/hide helpers and merge via the Kit buckets.
+- Keep `npm test` green (includes the 35-check Playwright gate) and
+  refresh `npm run visual` when the look changes. Update PROGRESS.md's
+  honesty ledger — never mark unreviewed work as verified.

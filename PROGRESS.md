@@ -1,214 +1,168 @@
-# Crew of One — Progress
+# Crew of One — Progress (V2 VISUAL & CUSTOMIZATION REBUILD)
 
-**Status: LIVE at https://crew-of-one.onrender.com**
+**Production status: UNCHANGED.** V1 remains live at
+https://crew-of-one.onrender.com deploying from `main`. Everything below
+ships on the branch `claude/v2-visual-mech-rebuild-wu5u5g`; a separate
+Render preview service is defined in `render.yaml`
+(`crew-of-one-v2-preview`) and deploy steps are in PLAYTEST.md.
+Rollback point: `main` @ `fc907ec` (tagged `v1-stable` locally; tag push
+is blocked by the integration's branch-scoped credentials — the commit
+hash is the rollback reference).
 
-A cinematic co-op mech combat game. 2–8 friends share ONE giant mech;
-each pilot controls a different system (LEGS / ARM_L / ARM_R / HEAD).
-Four modes, a QA-gated deploy pipeline, no accounts.
-
----
-
-# LATEST OVERHAUL (serious cinematic identity + 4 modes + QA gate)
-
-## Section 1 — Critical bug fixes (shipped first as a hotfix)
-- **Shop click bug (root cause + fix):** the shop overlay re-rendered its
-  item buttons on *every* 20 Hz snapshot (`innerHTML` wipe), so a mouse
-  press and release never landed on the same DOM node — purchases were
-  impossible in production. Fix: the item list now rebuilds **only when
-  credits / prices / owned upgrades change**, and items buy on
-  `pointerdown`. A purchase pulses the credit counter, plays a sound, and
-  shows an INSTALLED toast; the stat change is visible in the HUD next
-  snapshot. Guarded by an E2E test that reproduces the exact 20 Hz
-  condition (`SHOP CLICK: credits deducted / stat increased`).
-- **Settings never discards purchases + pauses the room:** opening
-  settings (gear or Escape) sends a `pause` to the server, which freezes
-  `game.step()` for the **whole room** and broadcasts `paused` + the
-  pauser's name (banner: "PAUSED BY <NAME>"). Anyone can resume by closing
-  settings; duels are exempt (versus mode). Purchases were never actually
-  discarded — that was a symptom of the click bug — but the pause removes
-  the "closing loses my stuff" fear entirely. Guarded by E2E (`host
-  settings pauses the live room`, `danger clock frozen`, `resumes`).
-- A latent crash the gate caught: `MSG` was unimported in `main.js`, which
-  had broken the settings-pause path; and `audioOn()` now swallows
-  AudioContext failures so blocked/limited audio can never block a UI
-  action like creating a room.
-
-## Section 2 — Four game modes (mode select in the lobby)
-- **ENDLESS ESCALATION** (Risk-of-Rain): danger clock scales spawns/hp/
-  damage forever; **supply beacons fully removed** — any player opens the
-  upgrade overlay anywhere with the **UPGRADES button / B** while the fight
-  continues behind it. (Constraint verified in tests: `g.inter.beacons`
-  is empty, `worldInfo().beacons` undefined, buy works with the mech
-  anywhere.)
-- **CLASSIC WAVE MODE** (restored): discrete waves with a **safe
-  between-wave shop**; host clicks READY for the next wave. Buying is
-  gated to the shop phase server-side (`server/classic.js`).
-- **MECH DUEL**: 1v1 crew-vs-crew, inherits all combat/visual upgrades.
-- **TRAINING**: free-roam with dummies, rings, balloon, crate tower.
-All four launch end-to-end in the E2E suite.
-
-## Section 4 — Weapons & combat
-- Melee (punch/kick) + HEAD eye-laser (moves at 30% while firing, not
-  rooted) remain. **New ranged systems, both purchasable:**
-  - **ROTARY CANNON** (ARMS, hold R-click / C): 0.6 s spin-up, 600 rpm
-    tracer fire with recoil + spread; server-authoritative tracer travel
-    and hit detection.
-  - **ROCKET PODS** (HEAD, tap R): homing missiles with splash from a
-    6-round magazine, +1 round every 4 s.
-  - Existing rares: rocket fist, auto shoulder turret, dash thrusters.
-- Monsters flash on hit; damage numbers pop; per-part damage attribution
-  (ARMS/LEGS/HEAD/TURRET) feeds the run summary. Server tests cover cannon
-  spin-up/damage and pod ammo/homing/regen.
-- **Honest scope note:** physics remains **cannon-es** (not Rapier). It
-  already provides believable mass, knockback scaled to hit power, and
-  ragdoll/stagger. A Rapier port is a larger swap left as future work;
-  the current feel meets the "weighty, knockback-proportional" bar.
-
-## Section 3 — Visuals (cinematic increment)
-Built on the prior night-rain pass: rain (single Points cloud), sweeping
-searchlights, horizon lightning that flashes the whole scene, bloom +
-CSS vignette, teal/orange-leaning night palette, red predator eye-slits
-on monsters. **This pass adds:** mech armour on **PBR
-MeshStandardMaterial** (brushed metal, metalness 0.85 / roughness 0.45)
-with emissive cockpit strips, lit by a **procedural PMREM night-city
-environment map** so metal catches neon reflection.
-- **Honest scope note:** this is a material/lighting increment, not a
-  from-scratch AAA re-authoring. No hand-painted scratch/normal texture
-  maps, no news-helicopter props, and motion-blur/film-grain passes are
-  not yet added. Documented as the next visual milestone.
-
-## Section 5 — World
-Seeded procedural district (blocks, wide avenues, river, landmark
-towers), interactables (explosive fuel tanks, repair stations, credit
-caches) balanced for both economies, 26-monster hard cap with fog-limited
-draw distance per quality tier. **Honest scope note:** distinct named
-districts (port/residential/downtown) and an on-screen compass/minimap
-are **not yet implemented** — the world is large and seeded but not yet
-district-partitioned. Listed as the next world milestone.
-
-## Section 6 — Audio
-Procedural adaptive score (pad/arp/drums/bass stems mapped continuously
-to the danger clock, boss lead layer) with a **tanh waveshaper on the
-lead** for a distorted guitar/synth-hybrid edge; sub-bass impacts, servo/
-roar/tracer/rocket sfx; instance caps + priority mixing retained. All
-synthesized (no copyrighted stems). **Honest scope note:** it's an
-original synth score, not a recorded live-instrument hybrid.
-
-## Section 7 — Settings
-Master / music / **SFX volume**, screen-shake intensity, graphics quality
-(low/med/high — fog, particles, shadows, bloom, pixel ratio), **camera
-sensitivity**, and a keybind reference. Persist to localStorage, apply
-immediately, and **opening settings pauses** (Section 1).
-
-## Section 8 — QA GATE (mandatory before deploy)
-- **`test/e2e.test.js`** — Playwright, two real browser clients, drives
-  every flow and clicks every UI button:
-
-```
-PASS  HOW TO PLAY opens
-PASS  settings opens from title
-PASS  settings persists master volume
-PASS  ENDLESS launched for both clients
-PASS  CONSTRAINT: no beacons in endless world
-PASS  mech moves (LEGS input)
-PASS  Endless upgrade menu opens mid-run (no beacon)
-PASS  shop lists the damage upgrade
-PASS  SHOP CLICK: credits deducted by price   (2000 - 45 => 1955)
-PASS  SHOP CLICK: upgrade stat visibly increased   (dmg 0 -> 1)
-PASS  CONSTRAINT: host settings pauses the live room (guest sees it)
-PASS  CONSTRAINT: danger clock frozen for the room while paused
-PASS  CONSTRAINT: closing settings resumes the room
-PASS  run summary appears on death
-PASS  summary shows survival time
-PASS  ONE MORE RUN restarts a run
-PASS  CLASSIC launched
-PASS  CLASSIC shop opens between waves
-PASS  CLASSIC shop shows READY-for-next-wave
-PASS  CLASSIC shop click purchases armor
-PASS  DUEL launched with two mechs
-PASS  DUEL assigns opposing crews
-PASS  TRAINING launched
-PASS  TRAINING shows objectives HUD
-PASS  LEAVE returns to title
-PASS  every UI button covered by a click test   (all covered)
-PASS  no console errors across all flows
-ALL PASS
-```
-
-- **`test/playtest-bot.test.js`** — a bot plays **5 minutes of Endless**:
-
-```
-RESULTS after 300s: frames=1325 softwareFps~4 (SwiftShader/no-GPU) nan=0 buys=15
-main-thread frame cost: avg 0.37ms (=2704fps capable) max 8.1ms
-memory: 14MB → … → 44MB (growth 30.5MB, healthy GC sawtooth)
-PASS  no console errors during 5-min playtest
-PASS  no NaN positions
-PASS  main-thread frame cost supports 60fps (<16.6ms)
-PASS  software-render fps above floor (no-GPU container)
-PASS  memory stable (growth < 150MB)
-PASS  bot actually exercised the shop   (buys=15)
-ALL PASS
-```
-  Frame-rate note: this container renders via **SwiftShader (software, no
-  GPU)**, so absolute fps is not representative. The **GPU-independent
-  main-thread cost (0.37 ms/frame = ~2700 fps capable)** is the real
-  60 fps proof; on any machine with a GPU the raster cost runs in
-  parallel and is far under budget.
-- `npm test` runs server-logic + rooms + e2e; `npm run qa` also runs the
-  5-min playtest. **The deploy step is gated on `npm test` passing** —
-  see the deploy checklist below. The shop-click bug class is now
-  impossible to ship without the E2E turning red.
-
-## Section 9 — Deploy
-Live at **https://crew-of-one.onrender.com** (Render free web service,
-deployed from this branch via the Render API). Redeploy procedure:
-`npm test` must be green, then trigger the Render deploy and verify the
-new bundle + a live two-client websocket check.
+Status vocabulary used below, honestly:
+- **VERIFIED** — covered by automated tests and/or reviewed in the
+  captured screenshots (docs/visual-review/).
+- **IMPLEMENTED** — code-complete and exercised by the smoke flows, but
+  not pixel-reviewed from every angle.
+- **PARTIAL / LIMITATION** — real, listed at the bottom, no disguises.
 
 ---
+
+## 1 · Mech rebuild — VERIFIED
+- New modular kitbash factory (`public/js/mechfab.js`): every visible part
+  is authored geometry — beveled extruded plates (hex/wedge outlines),
+  lathed hydraulics with sleeves, vent banks, cable runs, layered pauldrons,
+  segmented abdomen, sculpted feet — merged per articulation node
+  (~40–60 draw calls/mech). No visible raw engine primitive on the mech.
+- Full articulation: hips/knees/ankles with level-sole compensation,
+  analytic two-bone IK arms with elbows and outward pole vectors, chest
+  twist toward aim, aiming head, charge-reactive eye. Walk gait, kick
+  (windup/swing/recover), ragdoll and death poses are driven from
+  server state.
+- 3 frames × 3 heads × 3 torsos × 5 arms (per side) × 4 legs × 5 shoulder
+  mounts (per side) × 3 armour kits × 6 paint presets + custom paint,
+  4 decals, callsigns — all visibly different (screenshots 02/03).
+
+## 2 · Pre-run collaborative hangar — VERIFIED
+- The lobby IS the hangar: full-screen 3D bay (gantry, work lights, deck
+  crew for scale, steam, hazard rings) with drag-orbit + wheel zoom +
+  per-layer component highlight and an idle pose.
+- Role-owned stations, named proposals, votes with majority auto-apply,
+  locks, host resolution, ready check, localStorage presets, duel budget
+  meter, live stat readout. All server-authoritative
+  (`server/loadout.js` + `shared/loadout.js` validation/derivation).
+- E2E-verified with two real browsers: sync, proposal-not-overwrite,
+  majority vote application, incompatibility rejection, ready broadcast.
+
+## 3 · Visible run upgrades + previews — VERIFIED
+- Every shop upgrade physically attaches through the socket system
+  (armor tiers walk down the body; pods/turret/cannon/thrusters/emitter
+  hardware mount visibly). Replicated via snapshot `up` → identical on
+  all clients and after reconnect. Hovering a shop item previews the
+  attachment on the live mech before purchase (screenshots 11/12).
+
+## 4 · Environment rebuild — VERIFIED
+- Zoned district generator (server/city.js): glass core with setback
+  towers, concrete commercial, brick residential, corrugated industrial
+  quarter, flood-channel waterfront with embankments and cranes.
+- Scale cues everywhere: parked cars/vans/buses, traffic signals,
+  streetlights, lane dashes + crosswalks (real geometry), sidewalk
+  aprons, entrance awnings with lit doorways, rooftop water towers/HVAC/
+  antennas/parapets, billboards, war damage + rubble.
+- Facades: per-archetype generated sheets with normal maps AND separate
+  emissive window maps — windows glow at night regardless of wall tint.
+  Destructible buildings preserved from V1 (server-side HP, synced
+  collapses, rubble).
+
+## 5 · Atmosphere & weather — VERIFIED
+- Square particles are gone. Rain is ONE InstancedMesh of fine crossed-
+  quad streaks, wind-sheared, density-limited near the camera.
+- Weather machine rolls fronts during play (storm/rain/overcast/clear
+  night/golden/dawn) crossfading sky gradient, fog, key/rim/fill,
+  cloud deck, stars/moon/sun, lightning (real jagged bolt + delayed
+  thunder). Wet-street roughness/puddle maps retained and improved.
+
+## 6 · Camera — VERIFIED
+- Close over-shoulder combat framing (the mech dominates the frame),
+  chest-height target, shoulder offset, dynamic FOV on sprint/beam/kick,
+  building-aware boom shortening, budgeted impact shake, camera-follow
+  character fill so the hull never silhouettes out.
+
+## 7 · Monsters — VERIFIED (models/anims), see limitation on variety
+- New Abyssal family (`monsterfab.js`): Ravager bruisers (4 armored
+  variants incl. Bulwark Titan and crested boss) rebuilt from
+  noise-sculpted hides + overlapping shell plates with articulated
+  4-leg gait, claw telegraphs/slams, jaw gape, stagger, hit flash,
+  collapse deaths, bioluminescent weak-seam vents. Stormcaller
+  (winged brute), Bile Spitter, Razorwing, Gnashers reworked to the
+  serious palette with the same state-driven animation set.
+- All combat remains telegraphed server-side state machines — no
+  damage from overlap.
+
+## 8 · UI rebuild — VERIFIED
+- Command-interface: blue-black glass, thin steel borders, cyan/amber/red
+  telemetry, uppercase tracked labels, mono numerals. The yellow
+  prototype banner is gone; stations show as a slim top chip.
+- New HUD: mech-silhouette status (tint tracks hull), systems readout
+  (RKT ammo / CANNON state / SENTRY / THRUSTERS / PLATE tier), threat
+  clock, credits, boss bar, crew states, ping markers, refit side-panel
+  shop with previews, professional end report.
+
+## 9 · Audio — IMPLEMENTED
+- Score direction rebuilt: 96 BPM, low synthetic brass swells + heroic
+  rising motif, war-tom fills, industrial anvil hits, sub bass; distinct
+  hangar (pre-deployment) state; danger-driven continuous mix + boss
+  layer. All procedural WebAudio, zero copied melodies.
+- SFX remain the synthesized set (servos, impacts, beam, rockets, roars,
+  thunder) with distance attenuation and instance caps.
+
+## 10 · Four modes — VERIFIED
+- Classic / Endless / Duel / Training all launch and run through the E2E
+  gate. Customization feeds Classic+Endless; Duel is a mirror match under
+  a 24-pt budget (validated server-side — fairness by construction);
+  Training allows live component swapping.
+
+## 11 · QA evidence — VERIFIED
+- `npm test`: server-logic + rooms + loadout (22 new assertions) + full
+  Playwright E2E — 35/35 PASS including 6 new hangar tests, two real
+  browser clients, every UI button, zero console errors.
+- `npm run visual`: 13 documented screenshots in `docs/visual-review/`
+  (title, hangar default/customized, storm spawn, golden weather, melee,
+  rockets, beam, monsters, boss, shop preview, upgraded mech, summary).
+- `npm run playtest`: 5-minute Endless soak — see measured numbers in
+  the "Performance" section below.
+
+## Performance (measured honestly)
+- Measured in this container via SwiftShader (software rasterizer — no
+  GPU), so absolute FPS here is not representative of player hardware;
+  the GPU-independent main-thread cost is the meaningful number.
+- 5-minute Endless soak (playtest bot, quality=medium):
+  main-thread frame cost **avg 2.68 ms/frame (≈373 fps capable), max
+  22.3 ms**; memory 33→92 MB over 5 min with a healthy GC sawtooth
+  (growth < 150 MB gate PASS); 0 console errors; 0 NaN positions; the bot
+  bought 15 upgrades. Software-raster fps in the container was ~1 fps —
+  that is SwiftShader CPU-rasterizing the full V2 scene and is logged as
+  informational, not a gate; on real GPUs rasterization runs on the GPU
+  while the measured main thread has ~14 ms of headroom.
+- Budgets in place: instanced rain, merged/batched city, pooled
+  effects/projectiles, monster cap (26), quality presets, disposal on
+  rebuild. No 60 FPS claim is made for real GPUs beyond the main-thread
+  headroom shown above — verify on the preview URL.
+
+## Known limitations (nothing below is disguised as done)
+- **No Blender/GLTF assets**: the container has no Blender and no asset
+  network; the pipeline is procedural kitbash by design (documented in
+  ASSET_PIPELINE.md with the GLTF migration path). LODs are budget-based
+  (caps/fog/instancing) rather than per-mesh LOD chains.
+- **Spitter/Razorwing/Gnasher** kept their V1 skeleton logic with
+  reworked materials/sculpt helpers; the Ravager family and Stormcaller
+  got the full rebuild. More per-species polish is future work.
+- **Cannon barrels don't spin** visually and the Sentry turret doesn't
+  track (merged geometry); muzzle/tracer effects carry the read.
+- **Shield arm** soaks are passive DR; there is no projected-bubble
+  shield VFX yet. Forge Rig repairs are a stat trickle + rig model, no
+  welding-drone animation yet.
+- **Weather ambience audio** (rain loop/wind bed) not yet tied to the
+  weather machine; thunder is.
+- **Boss screenshot uses a test-only summon hook** (COO_TEST_CREDITS-
+  gated, inert in production) because reaching danger 3 takes 3 minutes.
+- Duel is a mirror match (both mechs share the crew's build) — fair and
+  budget-capped, but per-crew asymmetric duel builds are future work.
+- Screenshots were captured under software rendering; on a real GPU the
+  MSAA/bloom output is cleaner than the evidence PNGs.
 
 ## Test-only affordances (never active in production)
-- `COO_TEST_CREDITS` env → starting credits for deterministic shop E2E.
-- `testShop` websocket message (gated by `COO_TEST_CREDITS`) → jumps
-  Classic to the safe shop phase for the E2E purchase test.
-Neither is set in the production Render service.
-
-## Tuning values (quick reference)
-- Mech: walk 7.8 m/s, walkForce 3800, brake 3.2, turn 5200/1300.
-- Punch 16 dmg (×1+0.2·dmgTier), kick 36, laser 110 dps (×1+0.25·tier),
-  cannon 3 dmg @ 600 rpm, pods 34 dmg splash-8 (6 ammo, 4 s regen).
-- Danger: +1 level/60 s; bosses at levels 3/6/9/12/16/20; caps 26
-  monsters / 12 swarm.
-- Shop price growth ×1.35 per tier (repair ×1.2); rares 120–160©.
-
-## Porting to Steam/Electron
-Core game logic is server-side Node with no browser APIs. Client browser
-APIs are isolated to UI files (localStorage settings, pointer lock,
-WebAudio) — all shimmable in Electron. Ship = wrap client in Electron and
-run the Node server as a child process (or point at the hosted server).
-
-## Shipped in the cinematic overhaul (latest)
-- Authored models everywhere: detailed mech (reactor core, pauldrons,
-  T-visor, digitigrade legs, hydraulic-ram arms), organic kaiju (spiked
-  crab family incl. boss/tank/rusher, membrane-wing wyvern, acid-toad
-  spitter, spined swarmlings, feathered pigeon), detailed props (ribbed
-  fuel tanks, holo repair bays, armored caches, tiered landmark towers,
-  cars with wheels/lights).
-- Destructible city: buildings have HP server-side; fists, kicks,
-  rockets, the laser, tank blasts and bulldozing bosses fell them --
-  physics body removed, rubble + ballistic debris chunks client-side,
-  snapshot-synced for late joiners. Test hook: `COO_TEST_SPAWN` env
-  seeds the spawner + skips the grace period (off in production).
-- Procedural texture PBR: mottled window facades, asphalt with grain,
-  cracks and mirror-puddle roughness maps.
-- Dynamic weather: gusting wind-blown rain, breathing fog, lightning
-  with delayed thunder.
-- Dynamic sound: danger-driven adaptive score (hall reverb, sub-bass,
-  boss war-toms), reverb-sent impact SFX, distance-attenuated world mix.
-
-## Known gaps / next milestones (honest)
-- Rapier physics port (currently cannon-es).
-- District-partitioned world + compass/minimap.
-- Normal/scratch maps on the mech itself, motion blur, film grain,
-  helicopter/street-light scale props.
-- Recorded/hybrid live-instrument score.
+- `COO_TEST_CREDITS` env → deterministic shop E2E; also gates `testShop`
+  and `testBoss` websocket hooks (visual suite only).
+- `COO_TEST_SPAWN` env → seeds the spawner for deterministic tests.
+None are set in any deploy config.

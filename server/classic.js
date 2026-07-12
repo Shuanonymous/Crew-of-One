@@ -13,8 +13,8 @@ const WAVE_RECIPES = [
 ];
 
 export class ClassicWaveGame extends BrawlGame {
-  constructor(bestWave = 0) {
-    super(0);
+  constructor(bestWave = 0, build = null) {
+    super(0, build);
     this.mode = 'classic';
     this.wave = 0;
     this.bestWave = bestWave;

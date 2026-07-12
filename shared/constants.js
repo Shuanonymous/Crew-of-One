@@ -61,14 +61,14 @@ export const MECH = {
 // ---------------------------------------------------------------------------
 export const MONSTERS = {
   crab: {
-    name: 'CRABZILLA', behavior: 'melee',
+    name: 'REEF RAVAGER', behavior: 'melee',
     radius: 3.2, mass: 45, speed: 3.2,
     hp: 42, hpPerWave: 8, damage: 9, damagePerWave: 1.4,
     attackRange: 8.0, telegraph: 1.1, attackDur: 0.35, recover: 0.7,
     knockback: 1300, credits: 20,
   },
   pigeon: {
-    name: 'PIGEONZILLA', behavior: 'melee',
+    name: 'STORMCALLER', behavior: 'melee',
     radius: 3.6, mass: 70, speed: 4.3,
     hp: 95, hpPerWave: 11, damage: 16, damagePerWave: 1.8,
     attackRange: 9.0, telegraph: 1.25, attackDur: 0.4, recover: 0.9,
@@ -82,7 +82,7 @@ export const MONSTERS = {
     knockback: 420, credits: 8,
   },
   spitter: {
-    name: 'LOOGIE LOUIE', behavior: 'ranged',
+    name: 'BILE SPITTER', behavior: 'ranged',
     radius: 2.6, mass: 30, speed: 2.8,
     hp: 55, hpPerWave: 8, damage: 11, damagePerWave: 1.5,
     attackRange: 34,        // fires from way out here
@@ -92,7 +92,7 @@ export const MONSTERS = {
     knockback: 500, credits: 35,
   },
   tank: {
-    name: 'SIR CLANKSALOT', behavior: 'melee',
+    name: 'BULWARK TITAN', behavior: 'melee',
     radius: 5.0, mass: 220, speed: 1.5,
     hp: 320, hpPerWave: 35, damage: 22, damagePerWave: 2.5,
     attackRange: 10.5, telegraph: 1.6, attackDur: 0.5, recover: 1.3,
@@ -100,14 +100,14 @@ export const MONSTERS = {
     meleeResist: 0.25,      // punches/kicks do 25% — bring the laser
   },
   flyer: {
-    name: 'DIVE-BOMB DAVE', behavior: 'flyer',
+    name: 'RAZORWING', behavior: 'flyer',
     radius: 2.4, mass: 25, speed: 9,
     altitude: 15, circleRadius: 26, diveSpeed: 26, divePeriod: 5.5,
     hp: 40, hpPerWave: 6, damage: 12, damagePerWave: 1.6,
     telegraph: 0.9, credits: 45, knockback: 1500,
   },
   swarmling: {
-    name: 'GRABLIN', behavior: 'swarm',
+    name: 'GNASHER', behavior: 'swarm',
     radius: 0.75, mass: 3, speed: 8.5,
     hp: 3, hpPerWave: 0.5, damage: 1.4,   // per second while latched
     telegraph: 0, credits: 2, knockback: 0,

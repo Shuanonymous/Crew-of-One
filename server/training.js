@@ -10,7 +10,7 @@ import { PHYSICS_HZ, PHASE } from '../shared/constants.js';
 // balloon with the laser (HEAD). Timer runs until you finish.
 
 export class TrainingGame {
-  constructor() {
+  constructor(build = null) {
     this.world = new CANNON.World({ gravity: new CANNON.Vec3(0, -30, 0) });
     this.world.broadphase = new CANNON.SAPBroadphase(this.world);
     this.world.defaultContactMaterial.friction = 0.5;
@@ -18,9 +18,10 @@ export class TrainingGame {
     const city = buildCity(this.world, 42);
     this.cityDefs = city.defs;
 
-    this.mech = new Mech(this.world, 'mech1', { x: 0, y: 8, z: 20 }, '#f5b13d', Math.PI);
+    this.mech = new Mech(this.world, 'mech1', { x: 0, y: 8, z: 20 }, '#f5b13d', Math.PI, build);
 
     // Objectives
+    this.setBuild = (b) => this.mech.setBuild(b);   // live component swapping
     this.rings = [
       { id: 0, p: [0, 0, 0], done: false },
       { id: 1, p: [-20, 0, -14], done: false },

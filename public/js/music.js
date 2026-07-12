@@ -1,11 +1,13 @@
-// Procedurally generated adaptive music (WebAudio, no files, no licensing).
-// A tiny step sequencer in A minor at 112 BPM with three intensity states:
-//   lobby — warm pad + slow arpeggio
-//   wave  — add kick/snare/hats + driving bass (kaiju-movie synth)
-//   boss  — add a detuned lead + double-time hats
+// Procedurally generated adaptive score (WebAudio, no files, all original).
+// Direction: heavy and mechanical — deep sub bass, war-drum toms, metallic
+// industrial hits, low synthetic BRASS swells for the heroic motif, and a
+// snarling lead reserved for bosses. States:
+//   lobby/hangar — quiet pad + sparse arp + distant brass (pre-deployment)
+//   wave         — drums/bass/brass build continuously with the danger clock
+//   boss         — full kit, double-time hats, war-tom fills, lead motif
 // States crossfade via per-layer gain nodes.
 
-const BPM = 112;
+const BPM = 96;
 const STEP = 60 / BPM / 4;           // 16th notes
 const SCALE = [110, 130.81, 146.83, 164.81, 196, 220, 261.63]; // A minor-ish
 const BASS_LINE = [0, 0, 3, 0, 5, 0, 3, 2];                    // per half-bar
@@ -51,12 +53,18 @@ class Music {
       this.reverbSend = ctx.createGain(); this.reverbSend.gain.value = 0.38;
       this.reverbSend.connect(conv);
     } catch (e) { /* no convolver: run dry */ }
-    for (const name of ['pad', 'arp', 'drums', 'bass', 'lead']) {
+    // low synthetic brass: detuned saw stack through a dark lowpass
+    this.brassFilter = ctx.createBiquadFilter();
+    this.brassFilter.type = 'lowpass';
+    this.brassFilter.frequency.value = 620;
+    this.brassFilter.Q.value = 0.9;
+    this.brassFilter.connect(this.bus);
+    for (const name of ['pad', 'arp', 'drums', 'bass', 'lead', 'brass', 'metal']) {
       const g = ctx.createGain();
       g.gain.value = 0;
-      g.connect(name === 'lead' ? shaper : this.bus);
+      g.connect(name === 'lead' ? shaper : name === 'brass' ? this.brassFilter : this.bus);
       // melodic layers also feed the reverb bus for cinematic depth
-      if (this.reverbSend && (name === 'pad' || name === 'arp' || name === 'lead')) g.connect(this.reverbSend);
+      if (this.reverbSend && ['pad', 'arp', 'lead', 'brass', 'metal'].includes(name)) g.connect(this.reverbSend);
       this.layers[name] = g;
     }
     this.nextT = ctx.currentTime + 0.1;
@@ -71,9 +79,11 @@ class Music {
     const g = this.layers;
     const tgt = {
       pad: 0.75 - 0.3 * x,
-      arp: 0.4 + 0.3 * x,
+      arp: 0.35 + 0.25 * x,
       drums: x < 0.12 ? 0 : 0.35 + 0.65 * x,
       bass: x < 0.25 ? 0 : 0.3 + 0.6 * x,
+      brass: 0.2 + 0.6 * x,
+      metal: x < 0.4 ? 0 : 0.25 + 0.4 * x,
       lead: boss ? 0.7 : 0,
     };
     for (const [k, v] of Object.entries(tgt)) {
@@ -88,10 +98,11 @@ class Music {
     const t = this.ctx.currentTime;
     const target = {
       off: {},
-      lobby: { pad: 0.8, arp: 0.5 },
-      shop: { pad: 0.8, arp: 0.7 },
-      wave: { pad: 0.5, arp: 0.6, drums: 0.9, bass: 0.85 },
-      boss: { pad: 0.4, arp: 0.55, drums: 1.0, bass: 0.9, lead: 0.7 },
+      lobby: { pad: 0.8, arp: 0.45, brass: 0.12 },
+      hangar: { pad: 0.65, arp: 0.2, brass: 0.28 },  // pre-deployment: low, patient
+      shop: { pad: 0.8, arp: 0.6, brass: 0.2 },
+      wave: { pad: 0.5, arp: 0.55, drums: 0.9, bass: 0.85, brass: 0.55, metal: 0.35 },
+      boss: { pad: 0.4, arp: 0.5, drums: 1.0, bass: 0.9, brass: 0.8, metal: 0.5, lead: 0.7 },
     }[state] || {};
     for (const [name, g] of Object.entries(this.layers)) {
       g.gain.cancelScheduledValues(t);
@@ -130,6 +141,23 @@ class Music {
       this.tone('bass', SCALE[BASS_LINE[half]] * 0.5, t, STEP * 1.6, 'square', 0.22, 0.02);
       this.tone('bass', SCALE[BASS_LINE[half]] * 0.25, t, STEP * 1.6, 'sine', 0.20, 0.02);
     }
+    // BRASS: low swells on the chord root every 2 bars; a rising heroic
+    // root-fifth-octave figure leads into each 8-bar boundary
+    if (s % 32 === 0) {
+      const rootI = [0, 5, 3, 4][Math.floor(s / 32) % 4];
+      const f = SCALE[rootI] * 0.5;
+      this.tone('brass', f, t, STEP * 26, 'sawtooth', 0.34, 2.2);
+      this.tone('brass', f * 1.005, t, STEP * 26, 'sawtooth', 0.30, 2.2);
+      this.tone('brass', f * 1.5, t, STEP * 26, 'sawtooth', 0.16, 2.6);
+    }
+    if (s % 128 === 104) {  // the motif: three rising hits before the turn
+      const f = SCALE[0] * 0.5;
+      this.tone('brass', f, t, STEP * 6, 'sawtooth', 0.4, 0.08);
+      this.tone('brass', f * 1.5, t + STEP * 8, STEP * 6, 'sawtooth', 0.42, 0.08);
+      this.tone('brass', f * 2, t + STEP * 16, STEP * 8, 'sawtooth', 0.46, 0.08);
+    }
+    // METAL: industrial anvil hits off the backbeat
+    if (bar16 === 7 || bar16 === 15) this.clank(t);
     // drums
     if (bar16 % 4 === 0) this.kick(t);
     if (bar16 === 4 || bar16 === 12) this.snare(t);
@@ -181,6 +209,23 @@ class Music {
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.34);
     o.connect(g); g.connect(this.layers.drums);
     o.start(t); o.stop(t + 0.38);
+  }
+
+  // struck metal: ringing inharmonic partials through a bandpass — reads as
+  // a dockyard anvil, sells the industrial setting
+  clank(t) {
+    for (const [f, a] of [[817, 0.16], [1233, 0.1], [1968, 0.06]]) {
+      const o = this.ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = f;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(a, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = 9;
+      o.connect(bp); bp.connect(g); g.connect(this.layers.metal);
+      o.start(t); o.stop(t + 0.45);
+    }
   }
 
   snare(t) {

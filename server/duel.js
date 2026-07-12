@@ -9,7 +9,7 @@ import { PHYSICS_HZ, PHASE } from '../shared/constants.js';
 const DUEL_HP = 160;
 
 export class DuelGame {
-  constructor() {
+  constructor(build = null) {
     this.world = new CANNON.World({ gravity: new CANNON.Vec3(0, -30, 0) });
     this.world.broadphase = new CANNON.SAPBroadphase(this.world);
     this.world.defaultContactMaterial.friction = 0.5;
@@ -20,8 +20,10 @@ export class DuelGame {
     this.cars = cars.bodies;
     this.carDefs = cars.defs;
 
-    this.mechA = new Mech(this.world, 'mechA', { x: -18, y: 8, z: 0 }, '#f5b13d', -Math.PI / 2);
-    this.mechB = new Mech(this.world, 'mechB', { x: 18, y: 8, z: 0 }, '#7d9df0', Math.PI / 2);
+    // MIRROR MATCH: both mechs run the crew's build within the duel budget,
+    // so victory comes from piloting, never from a stat advantage.
+    this.mechA = new Mech(this.world, 'mechA', { x: -18, y: 8, z: 0 }, '#f5b13d', -Math.PI / 2, build);
+    this.mechB = new Mech(this.world, 'mechB', { x: 18, y: 8, z: 0 }, '#7d9df0', Math.PI / 2, build);
     for (const m of this.mechs) { m.hp = DUEL_HP; m.maxHp = DUEL_HP; }
 
     this.phase = PHASE.FIGHT;

@@ -1,84 +1,64 @@
-# Crew of One — Playtest Guide (15-minute checklist)
+# Crew of One V2 — Playtest & Deployment Guide
 
-**Live:** https://crew-of-one.onrender.com — send that link to friends.
+## Put the V2 PREVIEW online (plain English, ~5 minutes)
 
-Plain language. This walks you through all four modes in ~15 minutes.
-The free server naps when idle; the first visitor waits ~30–60 s while it
-wakes.
+The V2 rebuild lives on the branch `claude/v2-visual-mech-rebuild-wu5u5g`.
+Your current live game (V1, from `main`) is NOT touched by any of this.
 
-## Setup (1 min)
-1. Open the link, type a pilot name, click **CREATE ROOM**.
-2. Click **COPY INVITE LINK**, paste it to your crew (or they type the
-   4-letter code). You can also solo-test: one person can pilot the whole
-   mech.
-3. The host picks a mode and clicks **START**. Everyone gets a giant
-   "YOU ARE THE …" banner with their controls.
+**Option A — one-time blueprint sync (recommended):**
+1. Log in at https://dashboard.render.com
+2. Click **New +** → **Blueprint** → pick the `Crew-of-One` repository.
+3. When asked for a branch, choose `claude/v2-visual-mech-rebuild-wu5u5g`.
+4. Render reads `render.yaml` on that branch and offers two services:
+   your existing `crew-of-one` (leave it alone) and a new
+   **`crew-of-one-v2-preview`**. Apply.
+5. In a minute you get a URL like
+   `https://crew-of-one-v2-preview.onrender.com` — that's the preview.
 
-## Controls recap
-- **LEGS:** WASD move, SPACE kick, F dash (if bought).
-- **ARMS:** mouse aim, L/R click punch (J/K backup), hold right-click / C
-  spins the rotary cannon (if bought).
-- **HEAD:** mouse aims the mech's face + eye laser (hold click / E),
-  tap R to fire rocket pods (if bought).
-- **Anyone:** Q pings a target, X pings danger, B opens upgrades
-  (Endless), Esc or the ⚙ gear opens settings (pauses the run).
+**Option B — manual service:**
+1. Render dashboard → **New +** → **Web Service** → pick the repo.
+2. Branch: `claude/v2-visual-mech-rebuild-wu5u5g` · Runtime: Node ·
+   Build: `npm ci` · Start: `node server/index.js` · Plan: Free.
+3. Create. Done — the preview auto-redeploys whenever this branch updates.
 
-## 1) TRAINING (2 min) — learn the mech
-Pick **TRAINING**, START. Walk the three rings (LEGS), punch the two
-dummies (ARMS), kick over the crate tower, pop the balloon with the laser
-(HEAD). Good for teaching everyone their job with nothing biting back.
+**Promoting V2 to production (ONLY after you approve the preview):**
+merge the V2 branch into `main` (open a PR from
+`claude/v2-visual-mech-rebuild-wu5u5g` → `main` on GitHub and merge).
+Your existing `crew-of-one` service auto-deploys from `main` as always.
+To roll back at any time: `main` is untouched today, and the commit
+`fc907ec` is the stable V1 (also tagged `v1-stable` locally).
 
-## 2) CLASSIC WAVE MODE (4 min) — the friendly fight
-Back to lobby (host: BACK TO LOBBY on the summary, or LEAVE + recreate),
-pick **CLASSIC WAVE MODE**, START.
-- Fight the wave. When it clears, the **safe shop** opens automatically.
-- **Click an upgrade** — credits drop and the stat applies immediately
-  (watch the credit counter pulse). Buy a repair and some FIST SERVOS.
-- Host clicks **READY FOR NEXT WAVE**. Repeat. This is the relaxed mode.
+## Game night (15-minute checklist)
 
-## 3) ENDLESS ESCALATION (4 min) — the pressure cooker
-Lobby → **ENDLESS ESCALATION** → START.
-- The **danger clock** (top-left) never stops rising. There are **no
-  supply beacons** — press **B** or click **UPGRADES** anytime to open the
-  shop as an overlay **while the fight continues behind it**. Buying under
-  pressure is the point.
-- Try the ranged rares if you can afford them: **ROTARY CANNON** (hold
-  right-click to spin up, then tracer-hose a pack) and **ROCKET PODS**
-  (tap R for homing missiles).
-- Use the world: punch/laser an orange **fuel tank** near a crowd for a
-  big AoE; stand in a green **repair station** to heal (monsters wreck
-  them); smash **credit caches**.
-- **Wreck the city**: buildings are destructible. Punch or kick a small
-  one a couple of times, rocket a tower, or hold the laser on a facade —
-  it crumbles into a rubble mound with dust and a shockwave. Bosses and
-  armored tanks bulldoze straight through blocks to reach you.
-- Named bosses arrive at danger milestones with a health bar. When the
-  mech dies, the **run summary** shows time survived, the map seed, and
-  per-pilot damage. Beat the room's best time.
+1. One person opens the game and clicks **FORM A CREW**, then
+   **COPY INVITE LINK** and pastes it in the group chat.
+2. Everyone joins → you're all standing in **Hangar Bay 07**.
+3. Build the mech together:
+   - Each station (locomotion / arms / fire control) directly picks its
+     own components; picks on someone else's station become **proposals**
+     the crew votes on. The host can settle any argument.
+   - Try PAINT → a curated scheme, and ID → a callsign.
+   - Hit **READY** — the launch button shows when the whole crew is set.
+4. Host picks a mode:
+   - First night: **CLASSIC WAVE DEFENCE** (safe refits between waves).
+   - Comfortable: **ENDLESS ESCALATION** (refit under fire with **B**).
+   - Grudges: **MECH DUEL** (mirror machines — pure piloting).
+   - New pilots: **TRAINING** (swap components live, learn every weapon).
+5. In the refit shop, **hover an upgrade before buying** — it appears on
+   the mech so you can see what you're paying for.
+6. Controls are on the settings screen (**ESC**) — opening it pauses the
+   whole room, so nobody dies while you argue about sensitivity.
 
-## 4) MECH DUEL (2 min) — crew vs crew
-Needs 2+ players. Lobby → **MECH DUEL** → START. Two crews, two mechs,
-one plaza, same weapons. Last mech standing wins.
+## Controls
 
-## 5) Settings + pause (1 min) — test the co-op pause
-Mid-run, one player presses **Esc** (or the ⚙ gear). The whole room
-freezes with a **"PAUSED BY <name>"** banner. Adjust master/music/SFX
-volume, camera sensitivity, screen shake, or graphics quality (drop to
-**Low** if anything stutters). Close settings — the room resumes for
-everyone. Anyone can resume, not just the host.
+- **LOCOMOTION** — WASD walk · SPACE kick · F dash (thruster legs)
+- **ARMS** — mouse aim · L/R click (or J/K) punch · hold R-click / C = rotary cannon
+- **FIRE CONTROL** — mouse aim · hold click / E = charge beam · R = rockets
+- **Everyone** — Q mark target · X danger ping · B refit (Endless) · ESC systems/pause
 
-## What to look for / report back
-- Does clicking an upgrade always register and deduct credits? (This was
-  the big bug — it's now covered by an automated browser test.)
-- Does the mech feel weighty but responsive?
-- Are the ranged weapons worth their price?
-- Frame rate: if it stutters on a weak laptop, Settings → Graphics → Low.
-- Anything that reads as "toy/goofy" rather than "cinematic mech film"?
-  (The art is an ongoing cinematic pass — see PROGRESS.md "next
-  milestones" for what's still coming: districts, minimap, texture-mapped
-  PBR, motion blur.)
+## Known quirks
 
-## If something breaks
-Refresh the page (you land on the title screen; rejoin with the room
-code). If the room is gone, make a new one. Support/Discord links are on
-the title screen (placeholder URLs to fill in).
+- The preview URL sleeps on Render's free plan; first load takes ~30 s.
+- Headless/older GPUs: drop Graphics Quality to LOW in settings.
+- If a crewmate disconnects mid-run their stations merge into a
+  remaining pilot automatically (you'll see the banner).

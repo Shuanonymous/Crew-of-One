@@ -1,5 +1,6 @@
 import * as CANNON from 'cannon-es';
 import { MECH, WEAPONS } from '../shared/constants.js';
+import { deriveStats, validateBuild, DEFAULT_BUILD } from '../shared/loadout.js';
 
 // The mech: one heavy dynamic torso that hovers on stiff invisible legs.
 // HUGE and SLOW on purpose — wind-ups, thundering steps, deliberate turns.
@@ -9,15 +10,17 @@ import { MECH, WEAPONS } from '../shared/constants.js';
 const UP = new CANNON.Vec3(0, 1, 0);
 
 export class Mech {
-  constructor(world, id, spawnPos, color, facingYaw = 0) {
+  constructor(world, id, spawnPos, color, facingYaw = 0, build = null) {
     this.world = world;
     this.id = id;
     this.color = color;
     this.spawn = new CANNON.Vec3(spawnPos.x, spawnPos.y, spawnPos.z);
+    this.build = validateBuild(build || DEFAULT_BUILD).build;
+    this.d = deriveStats(this.build);   // authoritative derived stats
 
     const s = MECH.torsoSize;
     this.body = new CANNON.Body({
-      mass: MECH.torsoMass,
+      mass: MECH.torsoMass * this.d.massMul,
       shape: new CANNON.Box(new CANNON.Vec3(s.x / 2, s.y / 2, s.z / 2)),
       position: this.spawn.clone(),
       linearDamping: 0.25,
@@ -42,9 +45,14 @@ export class Mech {
       launch: false,     // HEAD rocket pods (press)
     };
 
-    this.hp = MECH.maxHp;
-    this.maxHp = MECH.maxHp;
+    this.maxHp = Math.round(MECH.maxHp * this.d.hpMul);
+    this.hp = this.maxHp;
     this.upgrades = { dmg: 0, armor: 0, speed: 0, laser: 0, rocket: false, turret: false, dash: false, cannon: false, pods: false };
+    // hangar-equipped systems come online from second zero
+    if (this.d.grants.cannon) this.upgrades.cannon = true;
+    if (this.d.grants.pods) this.upgrades.pods = true;
+    if (this.d.grants.turret) this.upgrades.turret = true;
+    if (this.d.grants.dash) this.upgrades.dash = true;
     this.dashCd = 0;
     this.turretCd = 0;
     this.prevDash = false;
@@ -132,7 +140,7 @@ export class Mech {
     let yawErr = this.input.headYaw - curYaw;
     while (yawErr > Math.PI) yawErr -= 2 * Math.PI;
     while (yawErr < -Math.PI) yawErr += 2 * Math.PI;
-    b.torque.y += yawErr * MECH.turnTorque - b.angularVelocity.y * MECH.turnDamping;
+    b.torque.y += yawErr * MECH.turnTorque * this.d.turnMul - b.angularVelocity.y * MECH.turnDamping;
     this.facingYaw = curYaw;
 
     // --- walking (locked while the laser is charging/firing or kicking) ---
@@ -144,7 +152,7 @@ export class Mech {
       const nx = mv.x / Math.max(1, mlen), nz = mv.z / Math.max(1, mlen);
       const wx = nx * Math.cos(yaw) + nz * Math.sin(yaw);
       const wz = -nx * Math.sin(yaw) + nz * Math.cos(yaw);
-      let maxSpd = MECH.maxWalkSpeed * (1 + 0.12 * this.upgrades.speed);
+      let maxSpd = MECH.maxWalkSpeed * this.d.speedMul * (1 + 0.12 * this.upgrades.speed);
       if (this.laserLock) maxSpd *= 0.3; // firing on the move, slowly — cinematic
       const hSpeed = Math.hypot(b.velocity.x, b.velocity.z);
       if (hSpeed < maxSpd) {
@@ -213,8 +221,11 @@ export class Mech {
     this.updateLaser(dt, targets);
 
     // --- falling over ---
+    // FORGE RIG / repair systems: slow trickle re-plating
+    if (this.d.regenHps > 0 && this.hp > 0 && this.hp < this.maxHp) this.heal(this.d.regenHps * dt);
+
     const uprightness = curUp.dot(UP);
-    if (uprightness < MECH.fallDotThreshold) {
+    if (uprightness < MECH.fallDotThreshold / this.d.stabilityMul) {
       this.tiltT += dt;
       if (this.tiltT > MECH.fallGraceSec) this.startRagdoll();
     } else {
@@ -374,7 +385,8 @@ export class Mech {
   resolvePunch(side, targets) {
     const P = MECH.punch;
     const yaw = side === 'L' ? this.input.armYawL : this.input.armYawR;
-    const dmg = P.damage * (1 + 0.2 * this.upgrades.dmg);
+    const armMul = side === 'L' ? this.d.meleeMulL : this.d.meleeMulR;
+    const dmg = P.damage * armMul * (1 + 0.2 * this.upgrades.dmg);
     const hit = this.sweepHit(targets, yaw, P.range, P.arc, dmg, P.knockback, 'ARMS');
     if (hit) {
       this.events.push({ what: 'punchHit', side });
@@ -441,7 +453,7 @@ export class Mech {
           k.phase = 'swing'; k.t = 0;
           this.stats.kicks++;
           this.kickSwung = true; // game modes use this to shake off swarmlings
-          const hit = this.sweepHit(targets, this.facingYaw, K.range, K.arc, K.damage * (1 + 0.2 * this.upgrades.dmg), K.knockback, 'LEGS');
+          const hit = this.sweepHit(targets, this.facingYaw, K.range, K.arc, K.damage * this.d.kickMul * (1 + 0.2 * this.upgrades.dmg), K.knockback, 'LEGS');
           this.events.push({ what: hit ? 'kickHit' : 'kickMiss' });
           // a mech-scale kick takes chunks out of whatever it lands beside
           const kr = aimDir(this.facingYaw, 0).scale(K.range * 0.7);
@@ -464,7 +476,7 @@ export class Mech {
   // ------------------------------------------------------------------ laser
   updateLaser(dt, targets) {
     const L = MECH.laser;
-    const chargeTime = L.chargeTime * Math.pow(0.9, this.upgrades.laser);
+    const chargeTime = L.chargeTime * this.d.laserChargeMul * Math.pow(0.9, this.upgrades.laser);
     const lz = this.laser;
 
     // aim guide: the whole crew always sees where the eye is pointing
@@ -474,7 +486,7 @@ export class Mech {
 
     if (lz.firing) {
       lz.fireT += dt;
-      const dmg = L.dps * (1 + 0.25 * this.upgrades.laser) * dt;
+      const dmg = L.dps * this.d.laserDmgMul * (1 + 0.25 * this.upgrades.laser) * dt;
       if (cast.target) {
         const dealt = cast.target.takeHit(dmg, cast.from, 60, 'laser');
         this.stats.damageDealt += dealt ?? dmg;
@@ -491,7 +503,7 @@ export class Mech {
       lz.hitting = !!cast.target;
       // the beam carves whatever structure it lands on
       this.onWorldHit?.(cast.end, 'laser', dmg);
-      if (lz.fireT >= L.fireTime) { lz.firing = false; lz.charge = 0; lz.from = lz.to = null; }
+      if (lz.fireT >= L.fireTime * this.d.laserFireTimeMul) { lz.firing = false; lz.charge = 0; lz.from = lz.to = null; }
       return;
     }
 
@@ -569,7 +581,7 @@ export class Mech {
   // ----------------------------------------------------------------- damage
   takeHit(dmg, fromPos, knockback = 0) {
     if (this.isDead || this.invulnT > 0) return;
-    const scaled = dmg * (1 - Math.min(0.6, 0.1 * this.upgrades.armor));
+    const scaled = dmg * (1 - Math.min(0.75, this.d.armorDR + 0.1 * this.upgrades.armor));
     this.hp = Math.max(0, this.hp - scaled);
     this.events.push({ what: 'hurt', dmg: Math.round(scaled) });
     if (knockback && fromPos) {
@@ -608,6 +620,21 @@ export class Mech {
     this.hp = Math.min(this.maxHp, this.hp + amount);
   }
 
+  // TRAINING live component swap: re-derive stats, keep the hull fraction.
+  setBuild(build) {
+    const frac = this.maxHp > 0 ? this.hp / this.maxHp : 1;
+    this.build = validateBuild(build).build;
+    this.d = deriveStats(this.build);
+    this.maxHp = Math.round(MECH.maxHp * this.d.hpMul);
+    this.hp = Math.max(1, Math.round(this.maxHp * frac));
+    this.body.mass = MECH.torsoMass * this.d.massMul;
+    this.body.updateMassProperties();
+    this.upgrades.cannon = this.upgrades.cannon || this.d.grants.cannon;
+    this.upgrades.pods = this.upgrades.pods || this.d.grants.pods;
+    this.upgrades.turret = this.upgrades.turret || this.d.grants.turret;
+    this.upgrades.dash = this.upgrades.dash || this.d.grants.dash;
+  }
+
   snapshot() {
     const b = this.body;
     const snap = {
@@ -642,6 +669,7 @@ export class Mech {
       missiles: this.missiles.map((ms) => ({ p: [rnd(ms.p.x), rnd(ms.p.y), rnd(ms.p.z)] })),
       podAmmo: this.podAmmo,
       up: this.upgrades,
+      build: this.build,
       ev: this.events,
     };
     this.events = [];

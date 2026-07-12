@@ -9,7 +9,7 @@ import { PHYSICS_HZ, PHASE, SHOP, DANGER, BEACON_RADIUS } from '../shared/consta
 // beacons out in the district. Risk-of-Rain pacing, kaiju-film tone.
 
 export class BrawlGame {
-  constructor(bestTime = 0) {
+  constructor(bestTime = 0, build = null) {
     this.world = new CANNON.World({ gravity: new CANNON.Vec3(0, -30, 0) });
     this.world.broadphase = new CANNON.SAPBroadphase(this.world);
     this.world.defaultContactMaterial.friction = 0.5;
@@ -25,7 +25,7 @@ export class BrawlGame {
     this.cars = cars.bodies;
     this.carDefs = cars.defs;
 
-    this.mech = new Mech(this.world, 'mech1', { x: 0, y: 8, z: 0 }, '#8a93a6');
+    this.mech = new Mech(this.world, 'mech1', { x: 0, y: 8, z: 0 }, '#8a93a6', 0, build);
     // every mech impact (fist, kick, rocket, beam) also lands on the city
     this.mech.onWorldHit = (p, kind, dmg) => this.hitWorld(p, kind, dmg);
     this.monsters = [];

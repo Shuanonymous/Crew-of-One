@@ -3,6 +3,8 @@ import { ClassicWaveGame } from './classic.js';
 import { DuelGame } from './duel.js';
 import { TrainingGame } from './training.js';
 import { PHYSICS_HZ, SNAPSHOT_HZ, MSG, MODES, ROLE, splitRoles } from '../shared/constants.js';
+import { LoadoutCrew } from './loadout.js';
+import { LOADOUT_MSG, validateBuild, buildCost, DUEL_BUDGET } from '../shared/loadout.js';
 import { stats } from './stats.js';
 
 // Rooms: 4-letter codes, a host, a lobby, and one running game.
@@ -93,9 +95,19 @@ export class RoomManager {
       case MSG.TO_LOBBY:
         room?.toLobby(id);
         break;
+      case LOADOUT_MSG:
+        room?.loadoutMsg(id, msg);
+        break;
       case 'testShop':
         // test-only, gated by COO_TEST_CREDITS (never set in production)
         if (process.env.COO_TEST_CREDITS && room?.game?.forceShop) room.game.forceShop();
+        break;
+      case 'testBoss':
+        // test-only (visual review suite): summon a boss for the camera
+        if (process.env.COO_TEST_CREDITS && room?.game?.spawnMonster) {
+          const m = room.game.spawnMonster('boss');
+          if (m) room.game.events.push({ what: 'bossArrives', name: m.bossName });
+        }
         break;
     }
   }
@@ -128,13 +140,14 @@ export class Room {
     this.bestTime = 0;        // best endless survival (seconds) this room has seen
     this.bestWave = 0;        // best classic wave reached this room has seen
     this.endCounted = false;
+    this.loadout = new LoadoutCrew(this);  // shared hangar build (authoritative)
   }
 
   get playing() { return !!this.game; }
 
   addPlayer(p) {
     p.room = this;
-    this.players.set(p.id, { id: p.id, ws: p.ws, name: p.name, roles: [], crew: 'A' });
+    this.players.set(p.id, { id: p.id, ws: p.ws, name: p.name, roles: [], nextRoles: [], crew: 'A' });
     if (!this.hostId) this.hostId = p.id;
     // joining mid-game: become a spectator until next round (roles = [])
     if (this.playing) {
@@ -147,7 +160,9 @@ export class Room {
         spectator: true,
       });
     }
+    this.previewRoles();
     this.broadcastRoom();
+    this.broadcastLoadout();
   }
 
   removePlayer(id) {
@@ -170,14 +185,57 @@ export class Room {
         this.sendRoles();
       }
     }
+    this.loadout.removePlayer(id);
+    this.previewRoles();
     this.broadcastRoom();
+    this.broadcastLoadout();
   }
 
   setMode(id, mode) {
     if (id !== this.hostId || this.playing) return;
     if (Object.values(MODES).includes(mode)) {
       this.mode = mode;
+      this.previewRoles();
       this.broadcastRoom();
+      this.broadcastLoadout();
+    }
+  }
+
+  // Compute the role split the NEXT run will use, without consuming the
+  // rotation. The hangar shows these as crew stations and the loadout layer
+  // ownership map is derived from them, so what you customize is what you
+  // pilot.
+  previewRoles() {
+    this.assignCrews();
+    const byCrew = { A: [], B: [] };
+    for (const p of this.players.values()) byCrew[p.crew].push(p);
+    for (const crew of ['A', 'B']) {
+      const members = byCrew[crew];
+      if (!members.length) continue;
+      const rot = this.roleRotation % members.length;
+      const order = [...members.slice(rot), ...members.slice(0, rot)];
+      const split = splitRoles(order.length);
+      order.forEach((p, i) => { p.nextRoles = split[i % split.length] || []; });
+    }
+  }
+
+  loadoutMsg(id, msg) {
+    // pre-run only — except TRAINING, which allows live component swapping
+    const liveTraining = this.playing && this.mode === MODES.TRAINING && msg.op === 'set';
+    if (this.playing && !liveTraining) return;
+    const res = this.loadout.handle(id, msg);
+    if (!res.ok || res.corrected) {
+      const p = this.players.get(id);
+      if (p && res.reason) send(p.ws, { t: MSG.ERR, msg: res.reason });
+    }
+    if (res.ok && liveTraining && this.game?.setBuild) this.game.setBuild(this.loadout.build);
+    this.broadcastLoadout();
+  }
+
+  broadcastLoadout() {
+    const data = JSON.stringify({ t: LOADOUT_MSG, ...this.loadout.serialize() });
+    for (const p of this.players.values()) {
+      if (p.ws.readyState === p.ws.OPEN) p.ws.send(data);
     }
   }
 
@@ -192,20 +250,12 @@ export class Room {
   }
 
   assignRoles() {
-    // rotate the player order every round so everyone gets new jobs
-    const byCrew = { A: [], B: [] };
-    for (const p of this.players.values()) byCrew[p.crew].push(p);
-    for (const crew of ['A', 'B']) {
-      const members = byCrew[crew];
-      if (!members.length) continue;
-      const rot = this.roleRotation % members.length;
-      const order = [...members.slice(rot), ...members.slice(0, rot)];
-      const split = splitRoles(order.length);
-      // 5+ pilots: double up round-robin — two people arguing over the same
-      // legs is not a bug, it's the premise
-      order.forEach((p, i) => { p.roles = split[i % split.length] || []; });
-    }
+    // adopt the previewed split (what the hangar showed) and consume the
+    // rotation so the NEXT run shuffles jobs
+    this.previewRoles();
+    for (const p of this.players.values()) p.roles = p.nextRoles || [];
     this.roleRotation++;
+    this.previewRoles();
   }
 
   start(id) {
@@ -213,13 +263,21 @@ export class Room {
     if (this.mode === MODES.DUEL && this.players.size < 2) {
       return send(this.players.get(id).ws, { t: MSG.ERR, msg: 'Duel needs at least 2 players (one per mech)' });
     }
+    // server-side final validation of the crew's build (never trust clients)
+    const v = validateBuild(this.loadout.build);
+    this.loadout.build = v.build;
+    if (this.mode === MODES.DUEL && buildCost(v.build) > DUEL_BUDGET) {
+      return send(this.players.get(id).ws,
+        { t: MSG.ERR, msg: `Duel budget exceeded (${buildCost(v.build)}/${DUEL_BUDGET} pts) — lighten the build` });
+    }
+    const build = v.build;
     this.assignCrews();
     this.assignRoles();
     this.game =
-      this.mode === MODES.DUEL ? new DuelGame() :
-      this.mode === MODES.TRAINING ? new TrainingGame() :
-      this.mode === MODES.CLASSIC ? new ClassicWaveGame(this.bestWave) :
-      new BrawlGame(this.bestTime);
+      this.mode === MODES.DUEL ? new DuelGame(build) :
+      this.mode === MODES.TRAINING ? new TrainingGame(build) :
+      this.mode === MODES.CLASSIC ? new ClassicWaveGame(this.bestWave, build) :
+      new BrawlGame(this.bestTime, build);
     this.endCounted = false;
     if (this.mode === MODES.DUEL) stats.duelsPlayed++;
     if (this.mode === MODES.TRAINING) stats.trainingsPlayed++;
@@ -251,7 +309,9 @@ export class Room {
     this.stopLoop();
     this.game = null;
     for (const p of this.players.values()) p.roles = [];
+    this.previewRoles();
     this.broadcastRoom();
+    this.broadcastLoadout();
   }
 
   input(id, data) {
@@ -310,7 +370,7 @@ export class Room {
 
   playerList() {
     return [...this.players.values()].map((p) => ({
-      id: p.id, name: p.name, roles: p.roles, crew: p.crew, host: p.id === this.hostId,
+      id: p.id, name: p.name, roles: p.roles, nextRoles: p.nextRoles || [], crew: p.crew, host: p.id === this.hostId,
     }));
   }
 

@@ -9,3 +9,15 @@ services:
     startCommand: node server/index.js
     healthCheckPath: /healthz
     autoDeploy: true
+
+  # V2 PREVIEW — separate service pinned to the V2 branch. Production
+  # (crew-of-one, tracks main) is untouched until the crew approves V2.
+  - type: web
+    name: crew-of-one-v2-preview
+    runtime: node
+    plan: free
+    branch: claude/v2-visual-mech-rebuild-wu5u5g
+    buildCommand: npm ci
+    startCommand: node server/index.js
+    healthCheckPath: /healthz
+    autoDeploy: true
